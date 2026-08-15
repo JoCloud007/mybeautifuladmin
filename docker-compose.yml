@@ -1,0 +1,67 @@
+name: mba
+
+services:
+  db:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: mba-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mba}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mba_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-mba}
+      TIMESCALEDB_TELEMETRY: "off"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mba} -d ${POSTGRES_DB:-mba}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [mba]
+
+  api:
+    build:
+      context: ./api
+    container_name: mba-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mba}:${POSTGRES_PASSWORD:-mba_dev_password}@db:5432/${POSTGRES_DB:-mba}
+      SECRET_KEY: ${SECRET_KEY:-change-me-please-generate-a-real-one}
+      VAULT_KEY: ${VAULT_KEY:-}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      POLL_INTERVAL: ${POLL_INTERVAL:-5}
+      DISCOVERY_SUBNETS: ${DISCOVERY_SUBNETS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TZ: ${TZ:-Europe/Paris}
+    volumes:
+      - api_keys:/data/keys
+      # Optionnel : monitorer le Docker de l'hôte qui fait tourner MBA
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "${API_PORT:-8080}:8000"
+    networks: [mba]
+
+  web:
+    build:
+      context: ./web
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-/api}
+    container_name: mba-web
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "${WEB_PORT:-8888}:80"
+    networks: [mba]
+
+volumes:
+  db_data:
+  api_keys:
+
+networks:
+  mba:
+    driver: bridge

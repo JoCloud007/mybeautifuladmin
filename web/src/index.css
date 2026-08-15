@@ -1,0 +1,135 @@
+@import '@xterm/xterm/css/xterm.css';
+@import 'uplot/dist/uPlot.min.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink-900 text-mist-200 font-sans antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'tnum';
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-ink-700 rounded-full border-2 border-solid border-transparent bg-clip-content;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ink-600;
+  }
+
+  input,
+  select,
+  textarea {
+    @apply bg-ink-850 border border-ink-700 rounded-lg px-3 py-2 text-sm text-mist-100
+           outline-none transition-colors placeholder:text-ink-500;
+  }
+  input:focus,
+  select:focus,
+  textarea:focus {
+    @apply border-accent/60 ring-2 ring-accent/15;
+  }
+  input[type='checkbox'] {
+    @apply w-4 h-4 accent-accent p-0;
+  }
+  label {
+    @apply text-xs font-medium text-mist-400 uppercase tracking-wide;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-ink-850 border border-ink-750 rounded-xl shadow-panel;
+  }
+  .panel-hover {
+    @apply transition-all duration-200 hover:border-ink-600 hover:shadow-[0_12px_32px_-16px_rgba(0,0,0,0.9)];
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium
+           transition-all duration-150 select-none disabled:opacity-40 disabled:pointer-events-none
+           whitespace-nowrap;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-ink-950 hover:bg-accent/90 active:scale-[0.98] font-semibold;
+  }
+  .btn-ghost {
+    @apply btn bg-ink-800 text-mist-200 border border-ink-700 hover:bg-ink-750 hover:border-ink-600 active:scale-[0.98];
+  }
+  .btn-danger {
+    @apply btn bg-danger/15 text-danger border border-danger/30 hover:bg-danger/25 active:scale-[0.98];
+  }
+  .btn-icon {
+    @apply btn px-2 py-2 bg-transparent text-mist-400 hover:text-mist-100 hover:bg-ink-750;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium
+           border leading-tight;
+  }
+  .metric-label {
+    @apply text-[10px] uppercase tracking-[0.08em] text-ink-500 font-semibold;
+  }
+  .metric-value {
+    @apply font-mono tabular-nums text-mist-100;
+  }
+  .skeleton {
+    @apply relative overflow-hidden bg-ink-800 rounded;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full animate-shimmer
+           bg-gradient-to-r from-transparent via-white/[0.04] to-transparent;
+  }
+}
+
+/* --- uPlot : on repeint le thème par-dessus les styles par défaut --- */
+.uplot,
+.u-wrap {
+  width: 100% !important;
+}
+.u-legend {
+  @apply text-[11px] text-mist-400 font-mono;
+  margin-top: 2px;
+}
+.u-legend .u-marker {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.u-legend th {
+  font-weight: 500;
+}
+.u-legend .u-value {
+  @apply text-mist-100;
+}
+.u-select {
+  background: rgba(0, 212, 170, 0.12);
+}
+.u-cursor-x,
+.u-cursor-y {
+  border-color: rgba(154, 167, 187, 0.35) !important;
+}
+
+/* --- xterm --- */
+.xterm .xterm-viewport {
+  background-color: transparent !important;
+}
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background: #323b4d;
+}

@@ -1,0 +1,55 @@
+# ---- Secrets et configuration locale -------------------------------------
+# Ne JAMAIS versionner : mots de passe, clés de chiffrement, jetons.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+secrets/
+vault.key
+jwt.key
+
+# ---- Données d'exécution --------------------------------------------------
+# Le volume Docker porte la base ; rien de tout cela n'a sa place dans git.
+data/
+pgdata/
+db_data/
+*.dump
+*.sql.gz
+backups/
+
+# ---- Dépendances et artefacts de build -----------------------------------
+node_modules/
+dist/
+.vite/
+build/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.eggs/
+*.egg-info/
+
+# ---- Outils et éditeurs ---------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+.claude/
+
+# ---- Journaux et fichiers temporaires -------------------------------------
+*.log
+logs/
+tmp/
+.cache/
+coverage/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
