@@ -7,14 +7,18 @@ import {
   Download,
   HardDrive,
   Info,
+  Lightbulb,
+  MonitorPlay,
   Play,
   Power,
   RefreshCw,
   RotateCcw,
+  Server,
   Square,
   TerminalSquare,
   Thermometer,
   Wifi,
+  Zap,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
@@ -27,16 +31,67 @@ import {
   Gauge,
   Modal,
   Spinner,
+  StatTile,
   StatusDot,
   Tabs,
   useConfirm,
   useToast,
 } from '@/components/ui'
 import { get, post } from '@/lib/api'
-import { ago, bitrate, bytes, duration, KIND_LABEL, percent, severity } from '@/lib/format'
+import { KIND_LABEL, ago, bitrate, bytes, duration, num, percent, severity } from '@/lib/format'
 import { useLive } from '@/lib/live'
 
 type Tab = 'live' | 'history' | 'system' | 'containers' | 'processes'
+
+interface HostTemplate {
+  /** Quelle vue « temps réel » a du sens pour ce type de machine. */
+  live: 'os' | 'bmc'
+  tabs: { id: Tab; label: string }[]
+}
+
+/**
+ * Compose la fiche selon ce que la machine est réellement.
+ *
+ * Un contrôleur BMC n'a ni processeur ni système de fichiers à montrer : lui
+ * afficher des jauges à 0 % et des graphiques vides serait un mensonge poli.
+ * On part donc du type d'hôte, puis on ne garde que les onglets dont le relevé
+ * porte effectivement la matière.
+ */
+function templateFor(host: any, sample: any): HostTemplate {
+  const kind = host.kind
+  const hasOsMetrics = sample['cpu.usage'] !== undefined || sample['mem.percent'] !== undefined
+  const hasSensorHistory =
+    Object.keys(sample.temps ?? {}).length > 0 ||
+    Object.keys(sample.fans ?? {}).length > 0 ||
+    sample.bmc?.power_watts != null
+
+  if (kind === 'ipmi') {
+    return {
+      live: 'bmc',
+      tabs: [
+        { id: 'live', label: 'Hors-bande' },
+        ...(hasSensorHistory ? [{ id: 'history' as Tab, label: 'Historique' }] : []),
+        { id: 'system', label: 'Matériel' },
+      ],
+    }
+  }
+
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'live', label: 'Temps réel' },
+    { id: 'history', label: 'Historique' },
+    { id: 'system', label: kind === 'synology' ? 'DSM & stockage' : 'Système' },
+  ]
+  if (kind === 'proxmox' || sample.containers) {
+    tabs.push({ id: 'containers', label: kind === 'proxmox' ? 'VM & LXC' : 'Conteneurs' })
+  }
+  if (sample.processes) tabs.push({ id: 'processes', label: 'Processus' })
+
+  // Un hôte joint par le seul socket Docker n'a pas d'historique système.
+  if (!hasOsMetrics && sample['docker.containers.total'] !== undefined) {
+    return { live: 'os', tabs: tabs.filter((t) => t.id !== 'history') }
+  }
+  return { live: 'os', tabs }
+}
 
 export function HostDetail() {
   const { id } = useParams()
@@ -66,6 +121,10 @@ export function HostDetail() {
 
   const meta = host.meta ?? {}
   const gpus = sample.gpus ?? []
+  const template = templateFor(host, sample)
+
+  // Un onglet retenu d'un hôte précédent peut ne pas exister sur celui-ci.
+  const currentTab = template.tabs.some((t) => t.id === tab) ? tab : template.tabs[0].id
 
   return (
     <Page>
@@ -103,28 +162,21 @@ export function HostDetail() {
       )}
 
       <div className="mb-4">
-        <Tabs<Tab>
-          active={tab}
-          onChange={setTab}
-          tabs={[
-            { id: 'live', label: 'Temps réel' },
-            { id: 'history', label: 'Historique' },
-            { id: 'system', label: 'Système' },
-            ...(host.kind === 'proxmox' || sample.containers
-              ? [{ id: 'containers' as Tab, label: host.kind === 'proxmox' ? 'VM & LXC' : 'Conteneurs' }]
-              : []),
-            ...(sample.processes ? [{ id: 'processes' as Tab, label: 'Processus' }] : []),
-          ]}
-        />
+        <Tabs<Tab> active={currentTab} onChange={setTab} tabs={template.tabs} />
       </div>
 
-      {tab === 'live' && <LiveTab hostId={hostId} sample={sample} kind={host.kind} gpus={gpus} />}
-      {tab === 'history' && <HistoryTab hostId={hostId} kind={host.kind} />}
-      {tab === 'system' && <SystemTab host={host} sample={sample} />}
-      {tab === 'containers' && (
+      {currentTab === 'live' &&
+        (template.live === 'bmc' ? (
+          <BmcTab host={host} sample={sample} />
+        ) : (
+          <LiveTab hostId={hostId} sample={sample} kind={host.kind} gpus={gpus} />
+        ))}
+      {currentTab === 'history' && <HistoryTab hostId={hostId} kind={host.kind} />}
+      {currentTab === 'system' && <SystemTab host={host} sample={sample} />}
+      {currentTab === 'containers' && (
         <ContainersTab host={host} sample={sample} onLogs={(name, text) => setLogs({ name, text })} />
       )}
-      {tab === 'processes' && <ProcessesTab sample={sample} />}
+      {currentTab === 'processes' && <ProcessesTab sample={sample} />}
 
       <Modal open={!!logs} onClose={() => setLogs(null)} title={`Journaux · ${logs?.name}`} width="max-w-4xl">
         <pre className="text-[12px] font-mono text-mist-300 whitespace-pre-wrap break-words leading-relaxed max-h-[62vh] overflow-y-auto">
@@ -143,6 +195,9 @@ function HostActions({ host }: { host: any }) {
   const [running, setRunning] = useState<string | null>(null)
   const [upgradeLog, setUpgradeLog] = useState<string | null>(null)
 
+  // Un BMC n'héberge rien : ni shell, ni paquets. Un NAS et un hyperviseur se
+  // mettent à jour depuis leur propre interface, pas par apt.
+  const isBmc = host.kind === 'ipmi'
   const canSsh = host.kind === 'linux' || host.kind === 'docker'
   const canUpgrade = canSsh
   const updates = host.meta?.updates ?? 0
@@ -192,6 +247,12 @@ function HostActions({ host }: { host: any }) {
           <b className="text-mist-100">{host.name}</b> ({host.address}) va{' '}
           {action === 'reboot' ? 'redémarrer' : "s'éteindre"} immédiatement. Les services hébergés seront
           interrompus.
+          {isBmc && (
+            <span className="block mt-2 text-warn">
+              L'ordre passe par le contrôleur hors bande : le système d'exploitation n'en est pas
+              averti, comme un appui sur le bouton physique.
+            </span>
+          )}
         </>
       ),
       confirmLabel: action === 'reboot' ? 'Redémarrer' : 'Éteindre',
@@ -223,7 +284,7 @@ function HostActions({ host }: { host: any }) {
         )}
         <button className="btn-ghost" onClick={() => power('reboot')} disabled={running === 'reboot'}>
           {running === 'reboot' ? <Spinner size={14} /> : <RotateCcw size={15} />}
-          Redémarrer
+          {isBmc ? 'Reset matériel' : 'Redémarrer'}
         </button>
         <button className="btn-danger" onClick={() => power('shutdown')} disabled={running === 'shutdown'}>
           <Power size={15} />
@@ -237,6 +298,176 @@ function HostActions({ host }: { host: any }) {
         </pre>
       </Modal>
     </>
+  )
+}
+
+// -------------------------------------------------------------- hors-bande
+const POWER_STATE: Record<string, { label: string; tone: 'ok' | 'warn' | 'danger' | 'neutral' }> = {
+  on: { label: 'Serveur allumé', tone: 'ok' },
+  off: { label: 'Serveur éteint', tone: 'neutral' },
+  paused: { label: 'En pause', tone: 'warn' },
+  unknown: { label: 'État inconnu', tone: 'warn' },
+}
+
+/**
+ * Vue d'un contrôleur d'administration hors bande.
+ *
+ * Ce qu'un BMC sait dire, c'est l'état d'alimentation, la santé matérielle et
+ * ses capteurs — pas la charge du système d'exploitation, qu'il ne voit pas.
+ */
+function BmcTab({ host, sample }: { host: any; sample: any }) {
+  const bmc = sample.bmc ?? {}
+  const meta = host.meta ?? {}
+  const temps: Record<string, number> = bmc.temps ?? sample.temps ?? {}
+  const fans: Record<string, number> = bmc.fans ?? sample.fans ?? {}
+  const psus: any[] = bmc.psus ?? []
+  const state = POWER_STATE[bmc.power_state ?? 'unknown'] ?? POWER_STATE.unknown
+  const healthy = (bmc.health ?? '').toUpperCase() === 'OK'
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatTile
+            label="Alimentation"
+            value={state.label}
+            tone={state.tone === 'ok' ? 'ok' : state.tone === 'danger' ? 'danger' : 'neutral'}
+            icon={<Power size={15} />}
+          />
+          <StatTile
+            label="Santé matérielle"
+            value={bmc.health ?? '—'}
+            tone={healthy ? 'ok' : bmc.health ? 'danger' : 'neutral'}
+            icon={<Activity size={15} />}
+          />
+          <StatTile
+            label="Consommation"
+            value={bmc.power_watts != null ? `${num(bmc.power_watts, 0)} W` : 'non exposée'}
+            icon={<Zap size={15} />}
+          />
+          <StatTile
+            label="LED de localisation"
+            value={bmc.indicator_led ?? '—'}
+            icon={<Lightbulb size={15} />}
+          />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="panel p-4">
+          <SectionTitle>Serveur administré</SectionTitle>
+          <Rows
+            rows={[
+              ['Constructeur', bmc.manufacturer ?? meta.manufacturer],
+              ['Modèle', clean(bmc.model) ?? clean(meta.model)],
+              ['Numéro de série', clean(bmc.serial) ?? clean(meta.serial)],
+              ['BIOS', bmc.bios ?? meta.bios],
+              ['Processeurs', bmc.cpu_count ?? meta.cpu_count],
+              ['Mémoire installée', bmc.mem_total ? bytes(bmc.mem_total) : null],
+              ['Nom d’hôte déclaré', bmc.host_name],
+            ]}
+          />
+        </div>
+
+        <div className="panel p-4">
+          <SectionTitle>Contrôleur</SectionTitle>
+          <Rows
+            rows={[
+              ['Adresse', `${host.address}${host.port ? `:${host.port}` : ''}`],
+              ['Transport', meta.bmc_mode === 'redfish' ? 'Redfish (HTTPS)' : 'ipmitool'],
+              ['Chiffrement', meta.bmc_secure ? 'TLS' : 'en clair'],
+              ['Modèle de BMC', bmc.bmc_model ?? meta.bmc_model],
+              ['Micrologiciel', bmc.bmc_firmware ?? meta.bmc_firmware],
+              ['Châssis', clean(bmc.chassis_model)],
+            ]}
+          />
+          <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-ink-800">
+            <Link to="/ipmi" className="btn-ghost">
+              <Server size={15} />
+              Piloter depuis Hors-bande
+            </Link>
+            {bmc.console_url && (
+              <a href={bmc.console_url} target="_blank" rel="noopener noreferrer" className="btn-ghost">
+                <MonitorPlay size={15} />
+                Console iKVM
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="panel p-4">
+        <SectionTitle
+          right={
+            <span className="text-xs text-ink-500">
+              {Object.keys(temps).length + Object.keys(fans).length + psus.length} relevé(s)
+            </span>
+          }
+        >
+          Capteurs du châssis
+        </SectionTitle>
+
+        {Object.keys(temps).length === 0 && Object.keys(fans).length === 0 && psus.length === 0 ? (
+          <Empty
+            icon={<Thermometer size={28} />}
+            title="Ce BMC n'expose aucun capteur"
+            hint="Le contrôleur répond, mais ses collections Thermal et Power sont vides — fréquent sur les cartes ASUS quand le serveur est éteint, ou quand le firmware ne publie les capteurs qu'au démarrage. Rallume le serveur, ou relève les températures depuis l'OS."
+          />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {Object.entries(temps).map(([name, value]) => (
+              <SensorRow key={name} name={name} value={`${num(value, 0)} °C`} tone={severity(value, 70, 85).color} />
+            ))}
+            {Object.entries(fans).map(([name, value]) => (
+              <SensorRow key={name} name={name} value={`${num(value, 0)} tr/min`} />
+            ))}
+            {psus.map((psu: any, index: number) => (
+              <SensorRow
+                key={psu.name ?? index}
+                name={psu.name ?? `Alimentation ${index + 1}`}
+                value={psu.status ?? '—'}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Les BMC renvoient volontiers des champs remplis d'espaces ou de « Default string ». */
+function clean(value: any): string | null {
+  const text = String(value ?? '').trim()
+  if (!text || text.toLowerCase() === 'default string' || text.startsWith('System ')) return null
+  return text
+}
+
+function Rows({ rows }: { rows: [string, any][] }) {
+  const kept = rows.filter(([, value]) => value !== null && value !== undefined && value !== '')
+  if (kept.length === 0) {
+    return <p className="text-[13px] text-ink-500">Le contrôleur n'a rien renseigné ici.</p>
+  }
+  return (
+    <div className="space-y-0">
+      {kept.map(([label, value]) => (
+        <div
+          key={label}
+          className="flex items-baseline justify-between gap-4 py-1.5 border-b border-ink-800/60 last:border-0"
+        >
+          <span className="text-[12px] text-ink-500 shrink-0">{label}</span>
+          <span className="text-[13px] text-mist-200 font-mono text-right truncate">{String(value)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SensorRow({ name, value, tone }: { name: string; value: string; tone?: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 bg-ink-850 rounded-lg px-3 py-2">
+      <span className="text-[12px] text-mist-300 truncate">{name}</span>
+      <span className="metric-value text-[13px]" style={tone ? { color: tone } : undefined}>
+        {value}
+      </span>
+    </div>
   )
 }
 
@@ -277,7 +508,7 @@ function LiveTab({ hostId, sample, kind, gpus }: { hostId: number; sample: any; 
                 {(['load.1', 'load.5', 'load.15'] as const).map((key, index) => (
                   <div key={key} className="flex flex-col items-center gap-1">
                     <span className="metric-value text-base" style={{ color: PALETTE[index] }}>
-                      {(sample[key] ?? 0).toFixed(2)}
+                      {num(sample[key], 2)}
                     </span>
                     <span className="text-[10px] text-ink-600">{key.split('.')[1]} min</span>
                   </div>
@@ -292,7 +523,7 @@ function LiveTab({ hostId, sample, kind, gpus }: { hostId: number; sample: any; 
                 <div className="flex items-baseline gap-1">
                   <Thermometer size={18} style={{ color: severity(sample['temp.cpu'], 70, 85).color }} />
                   <span className="metric-value text-2xl" style={{ color: severity(sample['temp.cpu'], 70, 85).color }}>
-                    {sample['temp.cpu'].toFixed(0)}
+                    {num(sample['temp.cpu'], 0)}
                   </span>
                   <span className="text-sm text-ink-500">°C</span>
                 </div>
@@ -455,7 +686,7 @@ function LiveTab({ hostId, sample, kind, gpus }: { hostId: number; sample: any; 
               <div key={name} className="flex items-center justify-between bg-ink-800/50 rounded-lg px-2.5 py-1.5">
                 <span className="text-[11px] text-mist-400 truncate font-mono">{name}</span>
                 <span className="metric-value text-xs" style={{ color: severity(value, 70, 85).color }}>
-                  {value.toFixed(0)}°
+                  {num(value, 0)}°
                 </span>
               </div>
             ))}
@@ -883,7 +1114,7 @@ function ContainersTab({
                   <Badge tone={running ? 'ok' : 'neutral'}>{item.state}</Badge>
                 </td>
                 <td className="px-3 py-2 w-24">
-                  <span className="metric-value text-xs">{stats.cpu !== undefined ? `${stats.cpu.toFixed(1)}%` : '—'}</span>
+                  <span className="metric-value text-xs">{stats.cpu !== undefined ? `${num(stats.cpu, 1)}%` : '—'}</span>
                 </td>
                 <td className="px-3 py-2 w-36">
                   {stats.mem !== undefined ? (
@@ -940,8 +1171,8 @@ function ContainersTab({
 function ProcessesTab({ sample }: { sample: any }) {
   const processes = sample.processes ?? []
   return (
-    <div className="panel overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="panel overflow-x-auto">
+      <table className="w-full text-sm min-w-[560px]">
         <thead>
           <tr className="text-left border-b border-ink-750">
             {['PID', 'Utilisateur', 'Commande', 'CPU', 'RAM', 'RSS'].map((header) => (
@@ -959,11 +1190,11 @@ function ProcessesTab({ sample }: { sample: any }) {
               <td className="px-3 py-1.5 font-mono text-[13px] text-mist-200 truncate max-w-[340px]">{proc.name}</td>
               <td className="px-3 py-1.5 w-32">
                 <div className="flex items-center gap-2">
-                  <span className="metric-value text-xs w-11 text-right">{proc.cpu.toFixed(1)}%</span>
+                  <span className="metric-value text-xs w-11 text-right">{num(proc.cpu, 1)}%</span>
                   <Bar value={proc.cpu} height={3} className="flex-1" />
                 </div>
               </td>
-              <td className="px-3 py-1.5 metric-value text-xs">{proc.mem.toFixed(1)}%</td>
+              <td className="px-3 py-1.5 metric-value text-xs">{num(proc.mem, 1)}%</td>
               <td className="px-3 py-1.5 metric-value text-xs">{bytes(proc.rss)}</td>
             </tr>
           ))}

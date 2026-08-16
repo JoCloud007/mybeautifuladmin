@@ -94,6 +94,9 @@ export const KIND_LABEL: Record<string, string> = {
   docker: 'Docker',
   generic: 'Générique',
   ollama: 'Ollama',
+  ipmi: 'IPMI / BMC',
+  homeassistant: 'Home Assistant',
+  pbs: 'Proxmox Backup',
 }
 
 export const STATUS_STYLE: Record<string, string> = {

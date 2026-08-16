@@ -362,6 +362,14 @@ class HostWorker:
             await log_event(self.id, "info", "collecte",
                             f"{self.host['name']} est de nouveau joignable",
                             {"apres_tentatives": self.fail_streak})
+            from . import notify
+            await notify.dispatch(
+                "host_up", f"{self.host['name']} de nouveau joignable",
+                notify.format_event(self.host["name"], "info",
+                                    "La collecte a repris.",
+                                    {"tentatives": self.fail_streak}),
+                dedupe_key=f"host_up:{self.id}",
+            )
         else:
             await execute("UPDATE hosts SET last_seen=now() WHERE id=:id", {"id": self.id})
 
@@ -387,6 +395,13 @@ class HostWorker:
             await log_event(self.id, "critical", "collecte",
                             f"{self.host['name']} injoignable — {message.splitlines()[0][:180]}",
                             detail)
+            from . import notify
+            await notify.dispatch(
+                "host_down", f"{self.host['name']} injoignable",
+                notify.format_event(self.host["name"], "critique",
+                                    message.splitlines()[0][:300], detail),
+                dedupe_key=f"host_down:{self.id}",
+            )
         else:
             await execute("UPDATE hosts SET last_error=:err WHERE id=:id", {"id": self.id, "err": message})
             # Toutes les 12 tentatives, on rappelle que la panne dure.
@@ -526,6 +541,15 @@ async def _check_service(client, service: dict) -> None:
         await log_event(service.get("host_id"), "warning" if not ok else "info", "service",
                         f"{service['name']} est {'DOWN' if not ok else 'de nouveau UP'}"
                         + (f" — {error}" if error else ""))
+        if not ok:
+            from . import notify
+            await notify.dispatch(
+                "service_down", f"{service['name']} ne répond plus",
+                notify.format_event(None, "avertissement",
+                                    f"{service['name']} ({service['url']}) est injoignable.",
+                                    {"erreur": error or f"code {code}"}),
+                dedupe_key=f"service:{service['id']}",
+            )
 
 
 async def poll_ai_endpoints() -> None:
@@ -596,6 +620,13 @@ async def _evaluate_rule(rule: dict) -> None:
         )
         await log_event(host_id, rule["severity"], "alert", message)
         bus.publish("alert", {"host_id": host_id, "severity": rule["severity"], "message": message})
+        from . import notify
+        await notify.dispatch(
+            "alert_firing", message[:120],
+            notify.format_event(row["name"], rule["severity"], message,
+                                {"métrique": rule["metric"], "seuil": rule["threshold"]}),
+            dedupe_key=f"alert:{rule['id']}:{host_id}",
+        )
 
     for host_id, alert in active_by_host.items():
         if host_id not in firing_hosts:

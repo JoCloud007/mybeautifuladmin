@@ -149,6 +149,41 @@ STATEMENTS: list[str] = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_proposals_state ON agent_proposals (state, created_at DESC)",
 
+    # -------------------------------------------------- auto-remédiation
+    """
+    CREATE TABLE IF NOT EXISTS remediation_rules (
+        id               SERIAL PRIMARY KEY,
+        name             TEXT NOT NULL,
+        description      TEXT,
+        trigger          TEXT NOT NULL,
+        action           TEXT NOT NULL,
+        params           JSONB NOT NULL DEFAULT '{}'::jsonb,
+        scope_kind       TEXT NOT NULL DEFAULT 'all',
+        scope_value      TEXT,
+        confirm_seconds  INTEGER NOT NULL DEFAULT 300,
+        cooldown_seconds INTEGER NOT NULL DEFAULT 1800,
+        max_per_day      INTEGER NOT NULL DEFAULT 3,
+        allow_destructive BOOLEAN NOT NULL DEFAULT false,
+        enabled          BOOLEAN NOT NULL DEFAULT true,
+        last_run         TIMESTAMPTZ,
+        last_status      TEXT,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS remediation_runs (
+        id         SERIAL PRIMARY KEY,
+        rule_id    INTEGER REFERENCES remediation_rules(id) ON DELETE CASCADE,
+        host_id    INTEGER REFERENCES hosts(id) ON DELETE SET NULL,
+        trigger    TEXT,
+        status     TEXT NOT NULL DEFAULT 'running',
+        detail     TEXT,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        ended_at   TIMESTAMPTZ
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_remediation_runs ON remediation_runs (rule_id, started_at DESC)",
+
     # --------------------------------------------- tableaux de bord perso
     """
     CREATE TABLE IF NOT EXISTS dashboards (

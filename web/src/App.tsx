@@ -14,7 +14,9 @@ import { InventoryPage } from './pages/Inventory'
 import { IpmiPage } from './pages/Ipmi'
 import { LoginPage } from './pages/Login'
 import { MonitoringPage } from './pages/Monitoring'
+import { NetworkPage } from './pages/Network'
 import { ProtectionPage } from './pages/Protection'
+import { RemediationPage } from './pages/Remediation'
 import { ProxmoxPage } from './pages/Proxmox'
 import { SchedulerPage } from './pages/Scheduler'
 import { SecurityPage } from './pages/Security'
@@ -44,6 +46,7 @@ export function App() {
         <Route path="/hosts/:id" element={<HostDetail />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/monitoring" element={<MonitoringPage />} />
+        <Route path="/network" element={<NetworkPage />} />
         <Route path="/security" element={<SecurityPage />} />
         <Route path="/protection" element={<ProtectionPage />} />
         <Route path="/home" element={<HomeAutomationPage />} />
@@ -51,6 +54,7 @@ export function App() {
         <Route path="/services" element={<ServicesPage />} />
         <Route path="/ai" element={<AiPage />} />
         <Route path="/agents" element={<AgentsPage />} />
+        <Route path="/remediation" element={<RemediationPage />} />
         <Route path="/proxmox" element={<ProxmoxPage />} />
         <Route path="/synology" element={<SynologyPage />} />
         <Route path="/ipmi" element={<IpmiPage />} />

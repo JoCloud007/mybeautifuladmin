@@ -1,6 +1,18 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { Boxes, HardDrive, Package, Play, Plus, Power, RotateCcw, Server, Share2, Square } from 'lucide-react'
+import {
+  ArrowUpCircle,
+  Boxes,
+  HardDrive,
+  Package,
+  Play,
+  Plus,
+  Power,
+  RotateCcw,
+  Server,
+  Share2,
+  Square,
+} from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AddHostModal } from '@/components/AddHostModal'
@@ -352,11 +364,44 @@ function PackagesTab({ nas }: { nas: any }) {
   const confirm = useConfirm()
   const [busy, setBusy] = useState<string | null>(null)
 
-  const { data: packages = [], isLoading, error } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['syno-packages', nas.id],
     queryFn: () => get(`/synology/${nas.id}/packages`),
     retry: false,
   })
+
+  const packages: any[] = data?.packages ?? []
+  const updates: any[] = data?.updates ?? []
+  // Un paquet peut être présent dans le catalogue sans être installé : on ne
+  // propose la mise à jour que pour ceux qu'on voit réellement sur le NAS.
+  const upgradable = new Map(updates.map((u: any) => [u.id, u]))
+
+  const upgrade = async (pkg: any) => {
+    const update = upgradable.get(pkg.id)
+    const ok = await confirm({
+      title: 'Mettre à jour ce paquet ?',
+      message: (
+        <>
+          <b className="text-mist-100">{pkg.name}</b> passera de{' '}
+          <code className="font-mono text-mist-300">{pkg.version ?? '?'}</code> à{' '}
+          <code className="font-mono text-accent">{update?.version ?? 'la dernière version'}</code>{' '}
+          sur {nas.name}. DSM interrompt le paquet le temps de l'installation.
+        </>
+      ),
+      confirmLabel: 'Mettre à jour',
+    })
+    if (!ok) return
+    setBusy(pkg.id)
+    try {
+      const result = await post(`/synology/${nas.id}/package/upgrade`, { package_id: pkg.id })
+      toast(result?.detail ?? `${pkg.name} : mise à jour lancée`, 'ok')
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['syno-packages', nas.id] }), 5000)
+    } catch (exc: any) {
+      toast(exc.message, 'danger')
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const act = async (pkg: any, action: 'start' | 'stop') => {
     if (action === 'stop') {
@@ -393,34 +438,81 @@ function PackagesTab({ nas }: { nas: any }) {
     )
   }
 
+  // DSM refuse parfois la liste sans lever d'erreur HTTP : la raison est alors
+  // dans la réponse, et elle dit quoi corriger.
+  if (data?.reason) {
+    return (
+      <div className="panel">
+        <Empty icon={<Package size={32} />} title="Paquets indisponibles" hint={data.reason} />
+      </div>
+    )
+  }
+
   return (
-    <div className="grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
-      {packages.map((pkg: any) => {
-        const running = pkg.status === 'running' || pkg.status === 'start'
-        return (
-          <div key={pkg.id} className={clsx('panel p-3 flex items-center gap-2.5', !running && 'opacity-70')}>
-            <Boxes size={16} className={running ? 'text-accent' : 'text-ink-500'} />
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] text-mist-100 truncate">{pkg.name}</div>
-              <div className="text-[10px] text-ink-600 font-mono truncate">{pkg.version}</div>
-            </div>
-            <Badge tone={running ? 'ok' : 'neutral'}>{pkg.status}</Badge>
-            <button
-              className="btn-icon"
-              onClick={() => act(pkg, running ? 'stop' : 'start')}
-              title={running ? 'Arrêter' : 'Démarrer'}
-              disabled={busy === pkg.id}
-            >
-              {busy === pkg.id ? <Spinner size={13} /> : running ? <Square size={13} /> : <Play size={14} />}
-            </button>
+    <div className="space-y-3">
+      {updates.length > 0 && (
+        <div className="panel p-3 flex items-center gap-3 border-accent/25 bg-accent/[0.05]">
+          <ArrowUpCircle size={18} className="text-accent shrink-0" />
+          <div className="flex-1 min-w-0 text-[13px] text-mist-200">
+            <b className="text-mist-100">
+              {updates.length} mise{updates.length > 1 ? 's' : ''} à jour
+            </b>{' '}
+            proposée{updates.length > 1 ? 's' : ''} par le catalogue Synology —{' '}
+            {updates.map((u: any) => u.name).join(', ')}
           </div>
-        )
-      })}
-      {packages.length === 0 && (
-        <div className="panel col-span-full">
-          <Empty icon={<Package size={32} />} title="Aucun paquet installé" />
         </div>
       )}
+
+      <div className="grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
+        {packages.map((pkg: any) => {
+          const running = pkg.status === 'running' || pkg.status === 'start'
+          const update = upgradable.get(pkg.id)
+          return (
+            <div
+              key={pkg.id}
+              className={clsx('panel p-3 flex items-center gap-2.5', !running && 'opacity-70')}
+              title={pkg.description || undefined}
+            >
+              <Boxes size={16} className={running ? 'text-accent' : 'text-ink-500'} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] text-mist-100 truncate">{pkg.name}</div>
+                <div className="text-[10px] text-ink-600 font-mono truncate">
+                  {pkg.version}
+                  {update && <span className="text-accent"> → {update.version}</span>}
+                </div>
+              </div>
+              {update ? (
+                <Badge tone="info">à jour dispo.</Badge>
+              ) : (
+                <Badge tone={running ? 'ok' : 'neutral'}>{pkg.status}</Badge>
+              )}
+              {update && (
+                <button
+                  className="btn-icon text-accent"
+                  onClick={() => upgrade(pkg)}
+                  title={`Mettre à jour vers ${update.version}`}
+                  disabled={busy === pkg.id}
+                >
+                  {busy === pkg.id ? <Spinner size={13} /> : <ArrowUpCircle size={14} />}
+                </button>
+              )}
+              <button
+                className="btn-icon"
+                onClick={() => act(pkg, running ? 'stop' : 'start')}
+                title={running ? 'Arrêter' : 'Démarrer'}
+                disabled={busy === pkg.id}
+              >
+                {busy === pkg.id ? <Spinner size={13} /> : running ? <Square size={13} /> : <Play size={14} />}
+              </button>
+            </div>
+          )
+        })}
+        {packages.length === 0 && (
+          <div className="panel col-span-full">
+            <Empty icon={<Package size={32} />} title="Aucun paquet installé" />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

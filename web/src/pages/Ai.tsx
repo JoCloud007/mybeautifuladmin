@@ -21,7 +21,7 @@ import { LiveChart, PALETTE } from '@/components/Chart'
 import { Page, PageHeader, SectionTitle } from '@/components/PageHeader'
 import { Badge, Bar, Empty, Gauge, Modal, Spinner, StatusDot, useConfirm, useToast } from '@/components/ui'
 import { del, get, post, sse } from '@/lib/api'
-import { bitrate, bytes, duration, percent, severity } from '@/lib/format'
+import { bitrate, bytes, duration, num, percent, severity } from '@/lib/format'
 import { useLive } from '@/lib/live'
 
 export function AiPage() {
@@ -134,13 +134,13 @@ function AcceleratorCard({ gpu }: { gpu: any }) {
             <div className="flex items-baseline gap-1">
               <Thermometer size={14} style={{ color: severity(gpu.temp, 75, 90).color }} />
               <span className="metric-value text-lg" style={{ color: severity(gpu.temp, 75, 90).color }}>
-                {gpu.temp.toFixed(0)}
+                {num(gpu.temp, 0)}
               </span>
               <span className="text-xs text-ink-500">°C</span>
             </div>
             {gpu.power > 0 && (
               <div className="text-[11px] text-ink-500 font-mono">
-                {gpu.power.toFixed(1)} W{gpu.power_cap ? ` / ${gpu.power_cap.toFixed(0)}` : ''}
+                {num(gpu.power, 1)} W{gpu.power_cap ? ` / ${num(gpu.power_cap, 0)}` : ''}
               </div>
             )}
           </div>
@@ -232,7 +232,7 @@ function HostVitals({ hostId, name }: { hostId: number; name?: string }) {
                 <div className="h-[78px] flex items-center">
                   <span className="metric-value text-xl"
                         style={{ color: severity(sample['temp.cpu'], 70, 85).color }}>
-                    {sample['temp.cpu'].toFixed(0)}°
+                    {num(sample['temp.cpu'], 0)}°
                   </span>
                 </div>
                 <span className="metric-label">Température</span>
@@ -244,7 +244,7 @@ function HostVitals({ hostId, name }: { hostId: number; name?: string }) {
                   {(['load.1', 'load.5', 'load.15'] as const).map((key, index) => (
                     <div key={key} className="flex flex-col items-center">
                       <span className="metric-value text-sm" style={{ color: PALETTE[index] }}>
-                        {(sample[key] ?? 0).toFixed(2)}
+                        {num(sample[key], 2)}
                       </span>
                       <span className="text-[9px] text-ink-600">{key.split('.')[1]}m</span>
                     </div>
@@ -660,10 +660,10 @@ function ChatModal({
                 <div className="mt-2 pt-2 border-t border-ink-700 flex items-center gap-3 text-[10px] text-ink-500 font-mono">
                   <span className="flex items-center gap-1">
                     <GaugeIcon size={10} />
-                    {message.stats.tps.toFixed(1)} tok/s
+                    {num(message.stats.tps, 1)} tok/s
                   </span>
                   <span>{message.stats.tokens} tokens</span>
-                  <span>{message.stats.total.toFixed(1)} s</span>
+                  <span>{num(message.stats.total, 1)} s</span>
                 </div>
               )}
             </div>

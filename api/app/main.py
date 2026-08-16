@@ -12,13 +12,14 @@ from fastapi.responses import JSONResponse
 from .config import settings
 from .db import execute, fetch_one, wait_for_db
 from .agents import run_scheduler_loop as run_agents
+from .remediation import run_loop as run_remediation
 from .audit import run_periodic as run_security_scan
 from .migrations import apply as apply_migrations
 from .poller import check_services, evaluate_alerts, poll_ai_endpoints, supervisor
 from .scheduler import run_scheduler
 from .routers import (agents, ai, auth, discovery, home, hosts, inventory, ipmi, monitoring,
-                      protection, proxmox, scheduler, security, services, stream, synology,
-                      terminal)
+                      network, notifications, protection, proxmox, remediation, scheduler,
+                      security, services, stream, synology, terminal)
 from .security import hash_password
 
 logging.basicConfig(
@@ -78,6 +79,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(run_scheduler(), name="scheduler"),
         asyncio.create_task(run_security_scan(), name="security"),
         asyncio.create_task(run_agents(), name="agents"),
+        asyncio.create_task(run_remediation(), name="remediation"),
     ])
     log.info("Prêt — collecte toutes les %ss", settings.poll_interval)
     try:
@@ -108,8 +110,8 @@ app.add_middleware(
 )
 
 for module in (auth, hosts, inventory, monitoring, services, ai, agents, discovery,
-               synology, proxmox, ipmi, protection, home, security, scheduler,
-               terminal, stream):
+               synology, proxmox, ipmi, protection, home, security, remediation,
+               notifications, network, scheduler, terminal, stream):
     app.include_router(module.router)
 
 

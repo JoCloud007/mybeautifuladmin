@@ -184,8 +184,8 @@ function HostTable({ hosts, onDelete }: { hosts: any[]; onDelete: (host: any) =>
   }
 
   return (
-    <div className="panel overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="panel overflow-x-auto">
+      <table className="w-full text-sm min-w-[680px]">
         <thead>
           <tr className="text-left border-b border-ink-750">
             {['Hôte', 'Type', 'CPU', 'RAM', 'Disque', 'Vu', ''].map((h) => (

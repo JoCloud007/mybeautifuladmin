@@ -18,6 +18,10 @@ class PackageActionIn(BaseModel):
     action: Literal["start", "stop"]
 
 
+class PackageUpgradeIn(BaseModel):
+    package_id: str
+
+
 @router.get("/hosts")
 async def syno_hosts(user: dict = Depends(current_user)) -> list[dict]:
     hosts = await fetch_all("SELECT * FROM hosts WHERE kind = 'synology' ORDER BY name")
@@ -34,7 +38,8 @@ async def syno_hosts(user: dict = Depends(current_user)) -> list[dict]:
 
 
 @router.get("/{host_id}/packages")
-async def packages(host_id: int, user: dict = Depends(current_user)) -> list[dict]:
+async def packages(host_id: int, user: dict = Depends(current_user)) -> dict:
+    """Paquets installés, mises à jour disponibles, et motif en cas d'échec."""
     host = await _require_syno(host_id)
     client = await client_for_host(host)
     try:
@@ -43,6 +48,25 @@ async def packages(host_id: int, user: dict = Depends(current_user)) -> list[dic
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
     finally:
         await client.logout()
+
+
+@router.post("/{host_id}/package/upgrade")
+async def upgrade_package(host_id: int, payload: PackageUpgradeIn,
+                          user: dict = Depends(current_user)) -> dict:
+    host = await _require_syno(host_id)
+    client = await client_for_host(host)
+    try:
+        result = await client.upgrade_package(payload.package_id)
+    except SynologyError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    finally:
+        await client.logout()
+
+    from ..poller import log_event
+    await log_event(host_id, "info", "synology",
+                    f"Mise à jour du paquet {payload.package_id} lancée sur {host['name']} "
+                    f"par {user['username']}")
+    return {"ok": True, **result}
 
 
 @router.get("/{host_id}/shares")

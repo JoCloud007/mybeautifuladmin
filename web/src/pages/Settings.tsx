@@ -1,12 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Info, KeyRound, Plus, Trash2, UserCog } from 'lucide-react'
+import clsx from 'clsx'
+import { Info, KeyRound, Plus, Send, Trash2, UserCog } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Page, PageHeader, SectionTitle } from '@/components/PageHeader'
 import { Badge, Empty, Modal, Spinner, Tabs, useConfirm, useToast } from '@/components/ui'
-import { del, get, patch, post } from '@/lib/api'
+import { api, del, get, patch, post } from '@/lib/api'
 import { datetime } from '@/lib/format'
 
-type Tab = 'credentials' | 'account' | 'about'
+type Tab = 'credentials' | 'notifications' | 'account' | 'about'
 
 export function SettingsPage() {
   const [tab, setTab] = useState<Tab>('credentials')
@@ -20,12 +21,14 @@ export function SettingsPage() {
           onChange={setTab}
           tabs={[
             { id: 'credentials', label: 'Identifiants' },
+            { id: 'notifications', label: 'Notifications' },
             { id: 'account', label: 'Compte' },
             { id: 'about', label: 'À propos' },
           ]}
         />
       </div>
       {tab === 'credentials' && <CredentialsTab />}
+      {tab === 'notifications' && <NotificationsTab />}
       {tab === 'account' && <AccountTab />}
       {tab === 'about' && <AboutTab />}
     </Page>
@@ -105,8 +108,8 @@ function CredentialsTab() {
       )}
 
       {credentials.length > 0 && (
-        <div className="panel overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="panel overflow-x-auto">
+          <table className="w-full text-sm min-w-[680px]">
             <thead>
               <tr className="text-left border-b border-ink-750">
                 {['Nom', 'Type', 'Utilisateur', 'Hôtes', 'Créé', ''].map((header) => (
@@ -359,6 +362,241 @@ function CredentialModal({
         )}
       </form>
     </Modal>
+  )
+}
+
+// ------------------------------------------------------------ notifications
+function NotificationsTab() {
+  const [form, setForm] = useState<any>(null)
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const toast = useToast()
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: () => get('/notifications'),
+  })
+
+  useEffect(() => {
+    if (data?.config) setForm({ ...data.config, to_addrs: (data.config.to_addrs ?? []).join(', ') })
+  }, [data])
+
+  if (isLoading || !form) {
+    return (
+      <div className="panel p-10 grid place-items-center">
+        <Spinner size={20} />
+      </div>
+    )
+  }
+
+  const payload = () => ({
+    enabled: form.enabled,
+    host: form.host,
+    port: Number(form.port),
+    security: form.security,
+    username: form.username,
+    ...(password ? { password } : {}),
+    from_addr: form.from_addr,
+    to_addrs: String(form.to_addrs)
+      .split(/[,;\s]+/)
+      .map((a: string) => a.trim())
+      .filter(Boolean),
+    triggers: form.triggers,
+    cooldown_minutes: Number(form.cooldown_minutes),
+  })
+
+  const save = async () => {
+    setBusy('save')
+    try {
+      await api('/notifications', { method: 'PUT', json: payload() })
+      toast('Notifications enregistrées', 'ok')
+      setPassword('')
+      queryClient.invalidateQueries({ queryKey: ['notifications'] })
+    } catch (exc: any) {
+      toast(exc.message, 'danger')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const test = async () => {
+    setBusy('test')
+    try {
+      const result = await post('/notifications/test', payload())
+      toast(result.detail, result.ok ? 'ok' : 'danger')
+    } catch (exc: any) {
+      toast(exc.message, 'danger')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const toggleTrigger = (key: string) =>
+    setForm({
+      ...form,
+      triggers: form.triggers.includes(key)
+        ? form.triggers.filter((t: string) => t !== key)
+        : [...form.triggers, key],
+    })
+
+  return (
+    <div className="space-y-4">
+      <div className="panel p-4 space-y-4">
+        <label className="flex items-center gap-2.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.enabled}
+            onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+          />
+          <span className="text-sm text-mist-100 normal-case tracking-normal font-normal">
+            Envoyer des notifications par courriel
+          </span>
+        </label>
+
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="space-y-1.5 sm:col-span-2">
+            <label>Serveur SMTP</label>
+            <input
+              value={form.host}
+              onChange={(e) => setForm({ ...form, host: e.target.value })}
+              placeholder="smtp.gmail.com"
+              className="w-full font-mono"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label>Port</label>
+            <input
+              type="number"
+              value={form.port}
+              onChange={(e) => setForm({ ...form, port: Number(e.target.value) })}
+              className="w-full"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label>Chiffrement</label>
+            <select
+              value={form.security}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  security: e.target.value,
+                  port: e.target.value === 'ssl' ? 465 : e.target.value === 'none' ? 25 : 587,
+                })
+              }
+              className="w-full"
+            >
+              <option value="starttls">STARTTLS (587)</option>
+              <option value="ssl">SSL/TLS (465)</option>
+              <option value="none">Aucun (25)</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <label>Utilisateur</label>
+            <input
+              value={form.username}
+              onChange={(e) => setForm({ ...form, username: e.target.value })}
+              className="w-full font-mono"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label>
+              Mot de passe
+              {form.has_password && (
+                <span className="normal-case tracking-normal text-ink-600"> — vide = inchangé</span>
+              )}
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={form.has_password ? '(enregistré)' : ''}
+              className="w-full font-mono"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <label>Expéditeur</label>
+            <input
+              value={form.from_addr}
+              onChange={(e) => setForm({ ...form, from_addr: e.target.value })}
+              placeholder="mba@exemple.fr"
+              className="w-full font-mono"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label>Destinataires</label>
+            <input
+              value={form.to_addrs}
+              onChange={(e) => setForm({ ...form, to_addrs: e.target.value })}
+              placeholder="moi@exemple.fr, astreinte@exemple.fr"
+              className="w-full font-mono"
+            />
+          </div>
+        </div>
+
+        <p className="text-[11px] text-ink-500">
+          Gmail, iCloud et Outlook refusent le mot de passe du compte : il faut un mot de passe
+          d'application dédié, créé depuis les réglages de sécurité du fournisseur.
+        </p>
+      </div>
+
+      <div className="panel p-4 space-y-3">
+        <SectionTitle>Quand notifier</SectionTitle>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          {Object.entries(data?.triggers ?? {}).map(([key, label]: [string, any]) => (
+            <label
+              key={key}
+              className={clsx(
+                'flex items-center gap-2.5 rounded-lg px-3 py-2 cursor-pointer border transition-colors',
+                form.triggers.includes(key)
+                  ? 'bg-accent/[0.07] border-accent/30'
+                  : 'bg-ink-850 border-ink-750 hover:border-ink-600',
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={form.triggers.includes(key)}
+                onChange={() => toggleTrigger(key)}
+              />
+              <span className="text-[13px] text-mist-200 normal-case tracking-normal font-normal">
+                {label}
+              </span>
+            </label>
+          ))}
+        </div>
+
+        <div className="space-y-1.5 max-w-xs">
+          <label>Silence entre deux messages identiques (min)</label>
+          <input
+            type="number"
+            min={0}
+            max={1440}
+            value={form.cooldown_minutes}
+            onChange={(e) => setForm({ ...form, cooldown_minutes: Number(e.target.value) })}
+            className="w-full"
+          />
+          <p className="text-[11px] text-ink-500">
+            Évite qu'une panne persistante ne remplisse ta boîte mail.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <button className="btn-ghost" onClick={test} disabled={busy !== null || !form.host}>
+          {busy === 'test' ? <Spinner size={14} /> : <Send size={15} />}
+          Envoyer un test
+        </button>
+        <button className="btn-primary" onClick={save} disabled={busy !== null}>
+          {busy === 'save' ? <Spinner /> : 'Enregistrer'}
+        </button>
+      </div>
+    </div>
   )
 }
 

@@ -53,7 +53,7 @@ function DiagnosticSteps({ steps }: { steps: any[] }) {
   )
 }
 import { del, get, post } from '@/lib/api'
-import { bytes, severity } from '@/lib/format'
+import { bytes, num, severity } from '@/lib/format'
 import { useLive } from '@/lib/live'
 
 /** Actions d'alimentation, de la plus douce à la plus brutale. */
@@ -328,12 +328,12 @@ function BmcPanel({
             <Tile label="Alimentation" value={on ? 'Allumé' : 'Éteint'} tone={on ? 'ok' : 'neutral'} />
             <Tile
               label="Consommation"
-              value={info.power_watts ? `${info.power_watts.toFixed(0)} W` : '—'}
+              value={info.power_watts ? `${num(info.power_watts, 0)} W` : '—'}
               icon={<Zap size={13} />}
             />
             <Tile
               label="Plus chaud"
-              value={hottest ? `${hottest[1].toFixed(0)} °C` : '—'}
+              value={hottest ? `${num(hottest[1], 0)} °C` : '—'}
               sub={hottest?.[0]}
               tone={hottest && hottest[1] >= 80 ? 'danger' : hottest && hottest[1] >= 65 ? 'warn' : 'ok'}
               icon={<Thermometer size={13} />}
@@ -421,7 +421,7 @@ function BmcPanel({
                           className="metric-value text-sm mt-0.5"
                           style={{ color: severity(value, 70, 85).color }}
                         >
-                          {value.toFixed(0)} °C
+                          {num(value, 0)} °C
                         </div>
                       </div>
                     ))}
@@ -458,7 +458,7 @@ function BmcPanel({
                     <div className="metric-label truncate" title={name}>
                       {name}
                     </div>
-                    <div className="metric-value text-sm mt-0.5">{value.toFixed(0)} rpm</div>
+                    <div className="metric-value text-sm mt-0.5">{num(value, 0)} rpm</div>
                   </div>
                 ))}
               </div>

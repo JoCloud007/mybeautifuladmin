@@ -19,6 +19,10 @@
   body {
     @apply bg-ink-900 text-mist-200 font-sans antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'tnum';
+    /* Le halo gris d'iOS au toucher parasite une interface sombre, et le
+       rebond élastique du document décolle la barre d'en-tête collante. */
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
   }
 
   ::-webkit-scrollbar {
@@ -40,6 +44,16 @@
   textarea {
     @apply bg-ink-850 border border-ink-700 rounded-lg px-3 py-2 text-sm text-mist-100
            outline-none transition-colors placeholder:text-ink-500;
+  }
+
+  /* Safari mobile zoome sur tout champ dont le texte fait moins de 16 px, et ne
+     dézoome jamais ensuite. On force donc 16 px sur les petits écrans. */
+  @media (max-width: 1023px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
   }
   input:focus,
   select:focus,
@@ -95,6 +109,35 @@
     content: '';
     @apply absolute inset-0 -translate-x-full animate-shimmer
            bg-gradient-to-r from-transparent via-white/[0.04] to-transparent;
+  }
+
+  /* Un tableau large ne doit jamais élargir la page : il défile chez lui. */
+  .table-scroll {
+    @apply overflow-x-auto -mx-1 px-1;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* --- Appareils tactiles (iPhone, iPad) --------------------------------- */
+@media (hover: none) {
+  /* Ce qui n'apparaît qu'au survol est inatteignable au doigt. */
+  .opacity-0.group-hover\:opacity-60,
+  .opacity-0.group-hover\:opacity-100 {
+    opacity: 0.65;
+  }
+
+  /* Apple recommande 44 pt de cible tactile ; nos icônes en font 32. */
+  .btn-icon {
+    @apply p-2.5;
+  }
+  .btn {
+    @apply py-2;
+  }
+
+  /* Le survol ne « colle » pas : on retire les effets qui resteraient figés
+     après un appui. */
+  .panel-hover:hover {
+    box-shadow: none;
   }
 }
 

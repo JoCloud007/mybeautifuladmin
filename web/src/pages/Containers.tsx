@@ -36,7 +36,7 @@ import {
   useToast,
 } from '@/components/ui'
 import { get, post } from '@/lib/api'
-import { bytes } from '@/lib/format'
+import { bytes, num } from '@/lib/format'
 
 type GroupBy = 'host' | 'project' | 'none'
 type ViewMode = 'expanded' | 'summary'
@@ -80,7 +80,10 @@ export function ContainersPage() {
   const [onlyRunning, setOnlyRunning] = useState(false)
   const [groupBy, setGroupBy] = useLocalState<GroupBy>('mba.ctGroup', 'project')
   const [view, setView] = useLocalState<ViewMode>('mba.ctView', 'expanded')
-  const [collapsed, setCollapsed] = useLocalState<string[]>('mba.ctCollapsed', [])
+  // On mémorise les groupes *dépliés*, et non les repliés : avec des dizaines
+  // de piles, arriver sur une page toute dépliée n'aide personne. Par défaut
+  // on voit donc la liste des piles, et on ouvre celle qui intéresse.
+  const [expanded, setExpanded] = useLocalState<string[]>('mba.ctExpanded', [])
   const [logs, setLogs] = useState<{ name: string; text: string } | null>(null)
   const [pruneHost, setPruneHost] = useState<any | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -142,10 +145,10 @@ export function ContainersPage() {
   }, [filtered, groupBy])
 
   const toggleCollapse = (key: string) =>
-    setCollapsed(collapsed.includes(key) ? collapsed.filter((k) => k !== key) : [...collapsed, key])
+    setExpanded(expanded.includes(key) ? expanded.filter((k) => k !== key) : [...expanded, key])
 
-  const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.includes(g.key))
-  const toggleAll = () => setCollapsed(allCollapsed ? [] : groups.map((g) => g.key))
+  const allCollapsed = groups.length > 0 && expanded.length === 0
+  const toggleAll = () => setExpanded(allCollapsed ? groups.map((g) => g.key) : [])
 
   const act = async (container: any, action: string) => {
     if (action === 'stop' || action === 'restart') {
@@ -401,8 +404,10 @@ export function ContainersPage() {
                     <td className="px-3 py-2.5">
                       <button
                         onClick={() => {
+                          // Depuis la synthèse, on bascule en détail sur cette
+                          // seule pile : les autres restent repliées.
                           setView('expanded')
-                          setCollapsed(groups.filter((g) => g.key !== group.key).map((g) => g.key))
+                          setExpanded([group.key])
                         }}
                         className="flex items-center gap-2 group text-left"
                       >
@@ -430,7 +435,7 @@ export function ContainersPage() {
                     <td className="px-3 py-2.5 w-32">
                       <div className="flex items-center gap-2">
                         <span className="metric-value text-xs w-12 text-right">
-                          {stats.cpu.toFixed(1)}%
+                          {num(stats.cpu, 1)}%
                         </span>
                         <Bar value={Math.min(100, stats.cpu)} height={3} className="flex-1" />
                       </div>
@@ -492,7 +497,10 @@ export function ContainersPage() {
 
       <div className={clsx('space-y-5', view === 'summary' && groupBy !== 'none' && 'hidden')}>
         {groups.map((group) => {
-          const isCollapsed = groupBy !== 'none' && collapsed.includes(group.key)
+          // Une recherche a déjà réduit la liste : replier le résultat le
+          // cacherait au moment précis où on le cherche.
+          const isCollapsed =
+            groupBy !== 'none' && !query.trim() && !expanded.includes(group.key)
           const stats = group.stats
           return (
           <section key={group.key}>
@@ -530,7 +538,7 @@ export function ContainersPage() {
                 <div className="flex items-center gap-3 text-[11px] text-ink-500 font-mono">
                   <span className="flex items-center gap-1">
                     <Cpu size={10} />
-                    {stats.cpu.toFixed(1)}%
+                    {num(stats.cpu, 1)}%
                   </span>
                   <span className="flex items-center gap-1">
                     <MemoryStick size={10} />
@@ -668,7 +676,7 @@ function ContainerCard({
           <div className="space-y-1">
             <div className="flex justify-between">
               <span className="metric-label">CPU</span>
-              <span className="metric-value text-[11px]">{stats.cpu.toFixed(1)}%</span>
+              <span className="metric-value text-[11px]">{num(stats.cpu, 1)}%</span>
             </div>
             <Bar value={Math.min(100, stats.cpu)} height={3} />
           </div>

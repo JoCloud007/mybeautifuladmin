@@ -16,6 +16,14 @@ class ProxmoxError(RuntimeError):
     pass
 
 
+def _f(value: Any, default: float = 0.0) -> float:
+    """L'API Proxmox mêle nombres et chaînes selon les champs."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 TOKEN_HELP = (
     "Proxmox a refusé l'authentification (401).\n\n"
     "Crée le jeton ainsi :\n"
@@ -118,31 +126,31 @@ class ProxmoxClient:
         guests, storages = [], []
         for res in resources:
             if res.get("type") in ("qemu", "lxc"):
-                maxmem = res.get("maxmem") or 0
+                maxmem = _f(res.get("maxmem"))
                 guests.append({
                     "vmid": res.get("vmid"),
                     "name": res.get("name") or f"{res.get('type')}-{res.get('vmid')}",
                     "type": res.get("type"),
                     "node": res.get("node"),
                     "status": res.get("status"),
-                    "cpu": round(100.0 * (res.get("cpu") or 0.0), 2),
+                    "cpu": round(100.0 * _f(res.get("cpu")), 2),
                     "maxcpu": res.get("maxcpu"),
-                    "mem": res.get("mem") or 0,
+                    "mem": _f(res.get("mem")),
                     "maxmem": maxmem,
-                    "mem_percent": round(100.0 * (res.get("mem") or 0) / maxmem, 2) if maxmem else 0.0,
-                    "disk": res.get("disk") or 0,
-                    "maxdisk": res.get("maxdisk") or 0,
-                    "uptime": res.get("uptime") or 0,
+                    "mem_percent": round(100.0 * _f(res.get("mem")) / maxmem, 2) if maxmem else 0.0,
+                    "disk": _f(res.get("disk")),
+                    "maxdisk": _f(res.get("maxdisk")),
+                    "uptime": _f(res.get("uptime")),
                     "tags": (res.get("tags") or "").split(";") if res.get("tags") else [],
                 })
             elif res.get("type") == "storage":
-                total = res.get("maxdisk") or 0
+                total = _f(res.get("maxdisk"))
                 storages.append({
                     "name": res.get("storage"),
                     "node": res.get("node"),
-                    "used": res.get("disk") or 0,
+                    "used": _f(res.get("disk")),
                     "total": total,
-                    "percent": round(100.0 * (res.get("disk") or 0) / total, 2) if total else 0.0,
+                    "percent": round(100.0 * _f(res.get("disk")) / total, 2) if total else 0.0,
                     "status": res.get("status"),
                 })
 
@@ -156,41 +164,47 @@ class ProxmoxClient:
                 status = {}
             mem = status.get("memory") or {}
             root = status.get("rootfs") or {}
-            cpu_pct = round(100.0 * (node.get("cpu") or status.get("cpu") or 0.0), 2)
+            cpu_pct = round(100.0 * _f(node.get("cpu") or status.get("cpu")), 2)
             entry = {
                 "node": name,
                 "status": node.get("status"),
                 "cpu": cpu_pct,
                 "cpu_count": (status.get("cpuinfo") or {}).get("cpus"),
                 "cpu_model": (status.get("cpuinfo") or {}).get("model"),
-                "mem_used": mem.get("used", node.get("mem", 0)),
-                "mem_total": mem.get("total", node.get("maxmem", 0)),
-                "disk_used": root.get("used", 0),
-                "disk_total": root.get("total", 0),
-                "uptime": status.get("uptime", node.get("uptime", 0)),
-                "loadavg": status.get("loadavg", []),
+                "mem_used": _f(mem.get("used", node.get("mem"))),
+                "mem_total": _f(mem.get("total", node.get("maxmem"))),
+                "disk_used": _f(root.get("used")),
+                "disk_total": _f(root.get("total")),
+                "uptime": _f(status.get("uptime", node.get("uptime"))),
+                "loadavg": [_f(x) for x in (status.get("loadavg") or [])],
                 "version": (status.get("pveversion") or node.get("pveversion") or ""),
             }
             node_stats.append(entry)
             metrics[f"pve.node.cpu.{name}"] = cpu_pct
             if entry["mem_total"]:
-                metrics[f"pve.node.mem.{name}"] = round(100.0 * entry["mem_used"] / entry["mem_total"], 2)
+                metrics[f"pve.node.mem.{name}"] = round(
+                    100.0 * entry["mem_used"] / entry["mem_total"], 2
+                )
 
         running = [g for g in guests if g["status"] == "running"]
         primary = node_stats[0] if node_stats else {}
+        loadavg = primary.get("loadavg") or []
         metrics.update({
-            "cpu.usage": primary.get("cpu", 0.0),
-            "mem.percent": round(100.0 * primary["mem_used"] / primary["mem_total"], 2)
+            "cpu.usage": _f(primary.get("cpu")),
+            "mem.percent": round(100.0 * _f(primary["mem_used"]) / _f(primary["mem_total"]), 2)
             if primary.get("mem_total") else 0.0,
-            "mem.used": primary.get("mem_used", 0),
-            "mem.total": primary.get("mem_total", 0),
-            "disk.percent": round(100.0 * primary["disk_used"] / primary["disk_total"], 2)
+            "mem.used": _f(primary.get("mem_used")),
+            "mem.total": _f(primary.get("mem_total")),
+            "disk.percent": round(100.0 * _f(primary["disk_used"]) / _f(primary["disk_total"]), 2)
             if primary.get("disk_total") else 0.0,
-            "uptime": primary.get("uptime", 0),
-            "load.1": (primary.get("loadavg") or [0])[0] if primary.get("loadavg") else 0,
-            "pve.guests.total": len(guests),
-            "pve.guests.running": len(running),
+            "uptime": _f(primary.get("uptime")),
+            "pve.guests.total": float(len(guests)),
+            "pve.guests.running": float(len(running)),
         })
+        # Les trois moyennes de charge, quand le nœud les expose.
+        for index, key in enumerate(("load.1", "load.5", "load.15")):
+            if index < len(loadavg):
+                metrics[key] = loadavg[index]
 
         return {
             "metrics": metrics,
@@ -359,6 +373,56 @@ class ProxmoxClient:
             "diskread": point.get("diskread"),
             "diskwrite": point.get("diskwrite"),
         } for point in data]
+
+    async def term_ticket(self, node: str, kind: str, vmid: int) -> dict[str, Any]:
+        """Ouvre un canal console côté Proxmox et renvoie de quoi s'y brancher.
+
+        `termproxy` donne un terminal texte (idéal LXC et shell de nœud),
+        `vncproxy` un flux VNC pour les VM. Les deux se consomment ensuite via
+        /vncwebsocket avec le ticket obtenu.
+        """
+        if kind == "node":
+            path = f"/nodes/{node}/termproxy"
+        elif kind == "lxc":
+            path = f"/nodes/{node}/lxc/{vmid}/termproxy"
+        else:
+            path = f"/nodes/{node}/qemu/{vmid}/termproxy"
+        data = await self.post(path) or {}
+        if not data.get("ticket"):
+            raise ProxmoxError(
+                "Proxmox n'a pas ouvert de console. Sur une VM, un port série doit être "
+                "configuré (« serial0: socket ») pour la console texte ; sinon utilise le "
+                "bouton noVNC."
+            )
+        return {"ticket": data["ticket"], "port": data.get("port"), "user": data.get("user")}
+
+    async def vnc_ticket(self, node: str, kind: str, vmid: int) -> dict[str, Any]:
+        """Ticket noVNC pour l'écran graphique d'une VM."""
+        path = (f"/nodes/{node}/qemu/{vmid}/vncproxy" if kind == "qemu"
+                else f"/nodes/{node}/lxc/{vmid}/vncproxy")
+        data = await self.post(path, {"websocket": 1}) or {}
+        if not data.get("ticket"):
+            raise ProxmoxError("Proxmox n'a pas fourni de ticket VNC")
+        return {"ticket": data["ticket"], "port": data.get("port"),
+                "cert": data.get("cert"), "user": data.get("user")}
+
+    def websocket_url(self, node: str, port: str | int, ticket: str,
+                      kind: str = "qemu", vmid: int | None = None) -> str:
+        """URL websocket Proxmox correspondant à un ticket console."""
+        from urllib.parse import quote
+
+        host = self.base.replace("/api2/json", "").replace("https://", "")
+        if kind == "node":
+            path = f"/nodes/{node}/vncwebsocket"
+        else:
+            path = f"/nodes/{node}/{kind}/{vmid}/vncwebsocket"
+        return f"wss://{host}/api2/json{path}?port={port}&vncticket={quote(str(ticket), safe='')}"
+
+    def auth_header(self) -> dict[str, str]:
+        """En-tête d'authentification réutilisable pour le proxy websocket."""
+        if self.token:
+            return {"Authorization": f"PVEAPIToken={self.token}"}
+        return {"Cookie": f"PVEAuthCookie={self._ticket}"} if self._ticket else {}
 
     def console_url(self, node: str, kind: str, vmid: int) -> str:
         """Lien vers la console noVNC de l'interface Proxmox native."""

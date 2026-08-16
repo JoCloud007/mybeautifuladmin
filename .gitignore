@@ -44,6 +44,11 @@ Thumbs.db
 *~
 .claude/
 
+# ---- Xcode (état d'IDE local, pas du code) --------------------------------
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
 # ---- Journaux et fichiers temporaires -------------------------------------
 *.log
 logs/

@@ -1,7 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as XTerm } from '@xterm/xterm'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { wsUrl } from '@/lib/api'
 
 const THEME = {
@@ -30,37 +30,96 @@ const THEME = {
 
 export type TermState = 'connecting' | 'open' | 'closed'
 
+export const FONT_STACKS: Record<string, string> = {
+  'JetBrains Mono': '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+  'SF Mono': 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+  Menlo: 'Menlo, Monaco, "Courier New", monospace',
+  'Fira Code': '"Fira Code", "JetBrains Mono", ui-monospace, monospace',
+  Système: 'monospace',
+}
+
+export interface TermPrefs {
+  fontFamily: string
+  fontSize: number
+  lineHeight: number
+  cursorStyle: 'bar' | 'block' | 'underline'
+  cursorBlink: boolean
+  scrollback: number
+  ttl: string
+  restore: boolean
+}
+
+export const DEFAULT_PREFS: TermPrefs = {
+  fontFamily: 'JetBrains Mono',
+  fontSize: 13,
+  lineHeight: 1.25,
+  cursorStyle: 'bar',
+  cursorBlink: true,
+  scrollback: 8000,
+  ttl: '30m',
+  restore: true,
+}
+
+/**
+ * Vue d'une session terminal.
+ *
+ * Le shell vit côté API : cette vue ne fait que s'y attacher. Fermer l'onglet
+ * du navigateur, changer de page ou perdre le réseau détache le client sans
+ * tuer le shell — on se rattache ensuite avec `sessionId` et l'API rejoue ce
+ * qui a défilé entre-temps.
+ */
 export function TerminalView({
   hostId,
   container,
+  sessionId,
+  prefs,
   onState,
-  fontSize = 13,
+  onSession,
 }: {
   hostId: number
   container?: string
+  sessionId?: string
+  prefs: TermPrefs
   onState?: (state: TermState) => void
-  fontSize?: number
+  onSession?: (id: string, resumed: boolean) => void
 }) {
   const holder = useRef<HTMLDivElement>(null)
-  const [, setNonce] = useState(0)
+  const term = useRef<XTerm | null>(null)
+  const socketRef = useRef<WebSocket | null>(null)
+  // L'identifiant de rattachement ne vaut qu'à l'ouverture : le mémoriser dans
+  // une ref évite que l'identifiant renvoyé par le serveur ne relance l'effet.
+  const resumeId = useRef(sessionId)
+
+  // Les préférences purement visuelles s'appliquent à chaud : les remettre dans
+  // les dépendances de l'effet reconstruirait le terminal à chaque réglage.
+  useEffect(() => {
+    if (!term.current) return
+    term.current.options.fontFamily = FONT_STACKS[prefs.fontFamily] ?? FONT_STACKS['JetBrains Mono']
+    term.current.options.fontSize = prefs.fontSize
+    term.current.options.lineHeight = prefs.lineHeight
+    term.current.options.cursorStyle = prefs.cursorStyle
+    term.current.options.cursorBlink = prefs.cursorBlink
+    term.current.options.scrollback = prefs.scrollback
+  }, [prefs])
 
   useEffect(() => {
     if (!holder.current) return
-    const term = new XTerm({
+    const xterm = new XTerm({
       theme: THEME,
-      fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
-      fontSize,
-      lineHeight: 1.25,
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      scrollback: 8000,
+      fontFamily: FONT_STACKS[prefs.fontFamily] ?? FONT_STACKS['JetBrains Mono'],
+      fontSize: prefs.fontSize,
+      lineHeight: prefs.lineHeight,
+      cursorBlink: prefs.cursorBlink,
+      cursorStyle: prefs.cursorStyle,
+      scrollback: prefs.scrollback,
       allowProposedApi: true,
       macOptionIsMeta: true,
     })
+    term.current = xterm
     const fit = new FitAddon()
-    term.loadAddon(fit)
-    term.loadAddon(new WebLinksAddon())
-    term.open(holder.current)
+    xterm.loadAddon(fit)
+    xterm.loadAddon(new WebLinksAddon())
+    xterm.open(holder.current)
 
     // Le fit doit attendre que le conteneur ait ses dimensions définitives.
     requestAnimationFrame(() => {
@@ -75,36 +134,42 @@ export function TerminalView({
     const socket = new WebSocket(
       wsUrl(`/ws/terminal/${hostId}`, {
         ...(container ? { container } : {}),
-        cols: term.cols,
-        rows: term.rows,
+        ...(resumeId.current ? { session: resumeId.current } : {}),
+        ttl: prefs.ttl,
+        cols: xterm.cols,
+        rows: xterm.rows,
       }),
     )
+    socketRef.current = socket
 
     socket.onopen = () => {
       onState?.('open')
-      term.focus()
+      xterm.focus()
     }
 
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data)
-      if (message.t === 'o' || message.t === 'e') term.write(message.d)
+      if (message.t === 'o' || message.t === 'e') xterm.write(message.d)
+      else if (message.t === 'session') {
+        resumeId.current = message.id
+        onSession?.(message.id, message.resumed)
+      }
     }
 
     socket.onclose = () => {
       onState?.('closed')
-      term.write('\r\n\x1b[38;5;244m── session terminée ──\x1b[0m\r\n')
+      xterm.write('\r\n\x1b[38;5;244m── détaché ──\x1b[0m\r\n')
     }
 
-    const dataSub = term.onData((data) => {
+    const dataSub = xterm.onData((data) => {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ t: 'i', d: data }))
     })
 
-    const sendResize = () => {
+    const resizeSub = xterm.onResize(() => {
       if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ t: 'r', cols: term.cols, rows: term.rows }))
+        socket.send(JSON.stringify({ t: 'r', cols: xterm.cols, rows: xterm.rows }))
       }
-    }
-    const resizeSub = term.onResize(sendResize)
+    })
 
     const observer = new ResizeObserver(() => {
       try {
@@ -119,18 +184,30 @@ export function TerminalView({
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ t: 'ping' }))
     }, 25000)
 
-    setNonce((n) => n + 1)
-
     return () => {
       window.clearInterval(keepAlive)
       observer.disconnect()
       dataSub.dispose()
       resizeSub.dispose()
       socket.close()
-      term.dispose()
+      xterm.dispose()
+      term.current = null
+      socketRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hostId, container, fontSize])
+  }, [hostId, container])
 
-  return <div ref={holder} className="w-full h-full [&_.xterm]:h-full [&_.xterm-screen]:!bg-transparent" />
+  // Changer la rétention s'applique aussi aux sessions déjà ouvertes.
+  useEffect(() => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ t: 'ttl', value: prefs.ttl }))
+    }
+  }, [prefs.ttl])
+
+  return (
+    <div
+      ref={holder}
+      className="w-full h-full [&_.xterm]:h-full [&_.xterm-screen]:!bg-transparent"
+    />
+  )
 }

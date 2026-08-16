@@ -16,12 +16,15 @@ import {
   Server,
   Settings2,
   Square,
+  TerminalSquare,
   Trash2,
   Undo2,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Chart, PALETTE } from '@/components/Chart'
+import { PveConsole } from '@/components/PveConsole'
+import { PveVnc } from '@/components/PveVnc'
 import { Page, PageHeader, SectionTitle } from '@/components/PageHeader'
 import {
   Badge,
@@ -523,7 +526,18 @@ function GuestCard({
 }
 
 // --------------------------------------------------------- fiche d'un invité
-type GuestTab = 'overview' | 'snapshots' | 'backups' | 'config'
+type GuestTab = 'overview' | 'console' | 'snapshots' | 'backups' | 'config'
+
+/** Actions d'alimentation, de la plus douce à la plus brutale. */
+const POWER_ACTIONS: { id: string; label: string; hint: string; danger: boolean; when: 'on' | 'off' | 'any' }[] = [
+  { id: 'start', label: 'Démarrer', hint: 'Met la machine sous tension', danger: false, when: 'off' },
+  { id: 'shutdown', label: 'Arrêt propre', hint: "Demande à l'OS de s'arrêter (ACPI)", danger: true, when: 'on' },
+  { id: 'reboot', label: 'Redémarrer', hint: 'Arrêt propre puis redémarrage', danger: true, when: 'on' },
+  { id: 'suspend', label: 'Suspendre', hint: "Gèle l'exécution, mémoire conservée", danger: true, when: 'on' },
+  { id: 'resume', label: 'Reprendre', hint: "Relance une machine suspendue", danger: false, when: 'off' },
+  { id: 'reset', label: 'Reset matériel', hint: 'Équivalent du bouton reset — brutal', danger: true, when: 'on' },
+  { id: 'stop', label: 'Arrêt forcé', hint: "Coupe l'alimentation virtuelle — brutal", danger: true, when: 'on' },
+]
 
 function GuestModal({
   clusterId,
@@ -537,6 +551,8 @@ function GuestModal({
   onChanged: () => void
 }) {
   const [tab, setTab] = useState<GuestTab>('overview')
+  const [consoleState, setConsoleState] = useState<'connecting' | 'open' | 'closed'>('connecting')
+  const [consoleMode, setConsoleMode] = useState<'text' | 'graphic'>('text')
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const toast = useToast()
@@ -555,6 +571,13 @@ function GuestModal({
   }
 
   const base = `/proxmox/${clusterId}/guests/${guest.kind}/${guest.vmid}`
+
+  // Un conteneur LXC a toujours une console ; une VM n'en a une que si sa
+  // configuration déclare un port série.
+  const noSerial =
+    guest.kind === 'qemu' &&
+    !!data?.raw_config &&
+    !Object.keys(data.raw_config).some((key) => /^serial\d+$/.test(key))
 
   const rollback = async (snapshot: any) => {
     const ok = await confirm({
@@ -663,6 +686,7 @@ function GuestModal({
             onChange={setTab}
             tabs={[
               { id: 'overview', label: "Vue d'ensemble" },
+              { id: 'console', label: 'Console' },
               {
                 id: 'snapshots',
                 label: 'Snapshots',
@@ -676,6 +700,85 @@ function GuestModal({
               { id: 'config', label: 'Configuration' },
             ]}
           />
+
+          <PowerBar
+            clusterId={clusterId}
+            guest={guest}
+            status={data.status}
+            onChanged={refresh}
+          />
+
+          {tab === 'console' && (
+            <div className="space-y-2">
+              {/* Une VM sans port série n'a pas de console texte : on bascule
+                  d'office sur l'écran graphique plutôt que d'afficher l'erreur
+                  brute de termproxy. Le choix reste offert quand les deux
+                  existent. */}
+              {!noSerial && (
+                <div className="flex bg-ink-850 border border-ink-750 rounded-lg p-0.5 w-fit">
+                  {(['text', 'graphic'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setConsoleMode(mode)}
+                      className={clsx(
+                        'px-3 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5',
+                        consoleMode === mode
+                          ? 'bg-ink-750 text-accent'
+                          : 'text-ink-500 hover:text-mist-300',
+                      )}
+                    >
+                      {mode === 'text' ? <TerminalSquare size={13} /> : <MonitorPlay size={13} />}
+                      {mode === 'text' ? 'Texte (série)' : 'Écran graphique'}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="h-[52vh] panel bg-ink-900 p-2">
+                {noSerial || consoleMode === 'graphic' ? (
+                  <PveVnc
+                    hostId={clusterId}
+                    kind={guest.kind}
+                    vmid={guest.vmid}
+                    node={data.node}
+                  />
+                ) : (
+                  <PveConsole
+                    hostId={clusterId}
+                    kind={guest.kind}
+                    vmid={guest.vmid}
+                    node={data.node}
+                    onState={setConsoleState}
+                  />
+                )}
+              </div>
+              <p className="text-[11px] text-ink-500">
+                {noSerial ? (
+                  <>
+                    Cette VM n'a pas de port série : MBA affiche donc son écran graphique. Pour
+                    disposer aussi d'une console texte, ajoute{' '}
+                    <span className="font-mono">serial0: socket</span> dans le matériel de la VM.
+                  </>
+                ) : consoleMode === 'graphic' ? (
+                  "Écran graphique relayé par MBA — clique dans l'image pour lui donner le clavier."
+                ) : (
+                  'Console texte relayée par MBA.'
+                )}{' '}
+                <a
+                  href={data.console_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent hover:underline"
+                >
+                  Ouvrir dans Proxmox
+                </a>
+                .
+                {consoleMode === 'text' && !noSerial && consoleState === 'closed' && (
+                  <span className="text-warn"> — session terminée, rouvre l'onglet pour reconnecter.</span>
+                )}
+              </p>
+            </div>
+          )}
 
           {tab === 'overview' && (
             <div className="space-y-4">
@@ -822,6 +925,80 @@ function GuestModal({
         </div>
       )}
     </Modal>
+  )
+}
+
+/** Toutes les actions d'alimentation, filtrées selon l'état courant. */
+function PowerBar({
+  clusterId,
+  guest,
+  status,
+  onChanged,
+}: {
+  clusterId: number
+  guest: { kind: string; vmid: number; name: string }
+  status?: string
+  onChanged: () => void
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const confirm = useConfirm()
+  const toast = useToast()
+  const running = status === 'running'
+
+  const run = async (action: (typeof POWER_ACTIONS)[number]) => {
+    if (action.danger) {
+      const brutal = ['stop', 'reset'].includes(action.id)
+      const ok = await confirm({
+        title: `${action.label} — ${guest.name} ?`,
+        message: (
+          <>
+            {action.hint}.
+            {brutal && (
+              <span className="block mt-2 text-warn">
+                Équivalent d'une coupure de courant : risque de corruption du système de fichiers.
+              </span>
+            )}
+          </>
+        ),
+        confirmLabel: action.label,
+        danger: brutal,
+      })
+      if (!ok) return
+    }
+    setBusy(action.id)
+    try {
+      await post(`/proxmox/${clusterId}/guests/${guest.kind}/${guest.vmid}/power/${action.id}`)
+      toast(`${action.label} envoyé à ${guest.name}`, 'ok')
+      setTimeout(onChanged, 2500)
+    } catch (exc: any) {
+      toast(exc.message, 'danger')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="panel bg-ink-900/50 p-2.5 flex flex-wrap items-center gap-1.5">
+      <StatusDot status={status} />
+      <span className="text-[12px] text-mist-300 mr-1">{running ? 'En marche' : 'Arrêtée'}</span>
+      {POWER_ACTIONS.filter(
+        (a) => a.when === 'any' || (a.when === 'on') === running,
+      ).map((action) => (
+        <button
+          key={action.id}
+          onClick={() => run(action)}
+          disabled={busy === action.id}
+          title={action.hint}
+          className={clsx(
+            'py-1 px-2.5 text-xs',
+            action.danger ? 'btn-danger' : 'btn-primary',
+          )}
+        >
+          {busy === action.id && <Spinner size={12} />}
+          {action.label}
+        </button>
+      ))}
+    </div>
   )
 }
 

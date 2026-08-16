@@ -205,18 +205,29 @@ export function Modal({
 
   if (!open) return null
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="absolute inset-0 bg-ink-950/80 backdrop-blur-sm" onClick={onClose} />
-      <div className={clsx('relative panel w-full animate-slideUp flex flex-col max-h-[88vh]', width)}>
-        <header className="flex items-center justify-between px-5 py-3.5 border-b border-ink-750 shrink-0">
+      {/* Sur téléphone la boîte devient une feuille ancrée en bas : le pouce y
+          atteint les boutons, et la hauteur suit le clavier virtuel. */}
+      <div
+        className={clsx(
+          'relative panel w-full animate-slideUp flex flex-col',
+          'max-h-[92dvh] rounded-b-none sm:rounded-xl sm:max-h-[88vh]',
+          'pb-[env(safe-area-inset-bottom)] sm:pb-0',
+          width,
+        )}
+      >
+        <header className="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-ink-750 shrink-0">
           <h2 className="font-semibold text-mist-100">{title}</h2>
           <button className="btn-icon" onClick={onClose} aria-label="Fermer">
             <X size={16} />
           </button>
         </header>
-        <div className="px-5 py-4 overflow-y-auto">{children}</div>
+        <div className="px-4 sm:px-5 py-4 overflow-y-auto overscroll-contain">{children}</div>
         {footer && (
-          <footer className="px-5 py-3 border-t border-ink-750 flex justify-end gap-2 shrink-0">{footer}</footer>
+          <footer className="px-4 sm:px-5 py-3 border-t border-ink-750 flex justify-end gap-2 shrink-0">
+            {footer}
+          </footer>
         )}
       </div>
     </div>,

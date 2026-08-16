@@ -115,11 +115,19 @@ dizaines de séries à 5 points/seconde restent fluides. Historique conservé
 
 **Terminal.** Sessions SSH interactives en onglets (xterm.js), redimensionnement
 propre, et shell direct **dans un conteneur** (`docker exec`) depuis n'importe
-quelle carte de conteneur.
+quelle carte de conteneur. Les sessions sont **persistantes** : le shell tourne
+côté serveur MBA, pas dans le navigateur. Changer de page, verrouiller l'écran
+ou perdre le réseau détache l'affichage sans interrompre ce qui s'exécute, et au
+retour la sortie manquée est rejouée depuis un tampon de 256 Ko. La rétention
+d'une session détachée se règle de 5 minutes à 24 heures, ou jusqu'à fermeture
+explicite ; un panneau de préférences donne aussi la police, le corps,
+l'interligne, le style de curseur et la profondeur d'historique, avec un aperçu
+en direct et la liste des sessions vivantes sur le serveur.
 
 **Actions.** Mise à jour des paquets avec sortie diffusée en direct, redémarrage,
 extinction, contrôle des services systemd, start/stop/restart des conteneurs,
-actions Proxmox sur les VM et LXC, reboot DSM et gestion des paquets Synology.
+actions Proxmox sur les VM et LXC, reboot DSM, et gestion des paquets Synology —
+démarrage, arrêt et **mise à jour** depuis le catalogue Synology.
 Chaque action est confirmée, tracée et consultable dans **Journal → Actions**.
 
 **Services web.** Sondes HTTP périodiques : disponibilité sur 24 h, latence,
@@ -164,7 +172,15 @@ temps (apparu / toujours là / résolu) et peut être ignoré en connaissance de
 Score global et par machine.
 
 **Proxmox.** Administration complète des invités : démarrage, arrêt propre ou
-forcé, redémarrage, suspension ; **snapshots** (création avec ou sans RAM,
+forcé, redémarrage, suspension, reset matériel — seules les actions cohérentes
+avec l'état courant de l'invité sont proposées, et celles qui coupent le système
+sans prévenir l'OS sont confirmées. La **console s'ouvre dans MBA**, en texte ou
+en graphique : le navigateur n'a ni le jeton d'API ni un certificat PVE accepté,
+l'API relaie donc `termproxy` vers un terminal xterm.js, et le flux **RFB** vers
+un client noVNC dessiné dans la page. Une VM sans port série n'a pas de console
+texte : MBA le détecte dans sa configuration et affiche directement son écran
+graphique, souris et clavier compris, plutôt que l'erreur brute de Proxmox. Puis
+**snapshots** (création avec ou sans RAM,
 restauration, suppression) ; **sauvegardes** vzdump vers le stockage de ton choix
 avec l'historique des archives ; **clonage** complet ou lié ; **migration** entre
 nœuds, à chaud ou à froid ; ajustement des cœurs, de la mémoire et du démarrage
@@ -215,8 +231,11 @@ passage.
 
 **Conteneurs.** Regroupement **par pile docker compose** (lu dans les labels
 `com.docker.compose.*`) ou **par hôte**, avec actions sur toute une pile —
-démarrer, arrêter, redémarrer d'un coup. Chaque groupe se **replie** (l'essentiel
-des ressources reste visible sur la ligne repliée), et une vue **synthèse** donne
+démarrer, arrêter, redémarrer d'un coup. Les groupes arrivent **repliés** : avec
+des dizaines de piles, on voit d'abord la liste, puis on ouvre celle qui
+intéresse — sauf pendant une recherche, où les résultats restent dépliés.
+L'essentiel des ressources reste visible sur la ligne repliée, et une vue
+**synthèse** donne
 une ligne par pile : conteneurs actifs, CPU et RAM cumulés, images, ports. La **mise à jour** se fait à deux
 niveaux : `docker pull` sur un conteneur pour récupérer sa dernière image, ou
 `compose pull && up -d` sur toute une pile — seule voie sûre pour recréer des
@@ -230,6 +249,56 @@ redémarrage, purge Docker, redémarrage d'un service ou d'un conteneur, command
 libre. La portée est un hôte, une **étiquette**, un type de machine, ou tout le
 parc. Un aperçu affiche les cibles concernées et les prochains passages avant
 d'enregistrer ; chaque exécution est journalisée et rejouable à la demande.
+
+**Réseau.** Tous les équipements vus sur le réseau au même endroit : hôtes
+supervisés, résultats de découverte et machines du tailnet, fusionnés et
+dédoublonnés. Regroupement **par sous-réseau, étiquette, emplacement, type ou
+catégorie** — les adresses Tailscale (`*.ts.net` et la plage CGNAT 100.64/10)
+sont reconnues comme un réseau à part entière. Les ports ouverts sont traduits en
+services lisibles (DSM, Proxmox, PBS, Ollama, Home Assistant…). Un onglet
+**historique** retrace ce qui est apparu, ce qui a été détecté sans être adopté,
+et la continuité de la collecte machine par machine — un trou dans les points
+relevés révèle une coupure.
+
+**Auto-remédiation.** Des règles qui corrigent d'elles-mêmes : *machine
+injoignable*, *service web en panne*, *alerte déclenchée*, *constat de sécurité*,
+*conteneur arrêté* ou *pression disque* déclenchent le redémarrage d'un service
+ou d'un conteneur, une mise à jour, une purge Docker, une analyse par un agent IA
+— ou une simple notification. La portée est un hôte, une étiquette, un type ou
+tout le parc, et un aperçu montre les cibles concernées avant d'enregistrer.
+Trois garde-fous encadrent chaque règle : un **délai de confirmation** (la
+condition doit tenir, une panne d'une seconde ne déclenche rien), un **repos**
+entre deux tentatives, et un **quota quotidien** qui empêche les rafales sur une
+panne durable. Les actions destructives — redémarrer une machine — exigent une
+autorisation explicite, cochée règle par règle ; sans elle, la règle refuse de
+s'exécuter.
+
+**Notifications.** Envoi par courriel (SMTP avec STARTTLS, SSL ou en clair),
+configuré dans **Réglages → Notifications** et testable d'un bouton. Le mot de
+passe est chiffré au même titre que les autres secrets. Chaque déclencheur
+s'active séparément — machine injoignable ou de retour, alerte, service en panne,
+constat de sécurité critique, risque de sauvegarde, action en échec, proposition
+d'agent, remédiation appliquée — et un délai de silence évite qu'une panne
+persistante ne remplisse la boîte mail.
+
+**Une fiche par type de machine.** La page d'un hôte se compose à partir de ce
+que la machine est réellement, pas d'un gabarit unique. Un contrôleur BMC n'a ni
+processeur ni système de fichiers : sa fiche montre l'alimentation, la santé
+matérielle, l'identité du serveur administré et ses capteurs — et dit clairement
+quand le contrôleur n'en expose aucun, au lieu d'afficher des jauges à 0 %. Un
+hôte joint par le seul socket Docker perd l'onglet historique système qu'il ne
+peut pas remplir ; un NAS annonce « DSM & stockage ». Les actions suivent :
+ni terminal ni `apt` sur un BMC, et « reset matériel » y remplace « redémarrer »,
+puisque l'ordre court-circuite le système d'exploitation.
+
+**iPhone et iPad.** L'interface est utilisable au doigt : la barre latérale
+devient un tiroir sous 1024 px, l'en-tête se condense et rappelle la page
+courante, les boîtes de dialogue s'ancrent en bas de l'écran à portée du pouce,
+les tableaux larges défilent chez eux sans élargir la page. Les champs de
+saisie passent à 16 px sur petit écran — en dessous, Safari zoome et ne revient
+jamais — les cibles tactiles sont agrandies, et ce qui n'apparaissait qu'au
+survol reste visible là où il n'y a pas de souris. Encoches et barres système
+sont respectées via les zones sûres.
 
 **Alertes.** Règles seuil + durée sur n'importe quelle métrique, avec résolution
 automatique. Trois règles sont créées par défaut (CPU, RAM, disque).
@@ -252,6 +321,9 @@ api/app/
   audit.py         contrôles de sécurité et suivi des constats
   protection.py    couverture des sauvegardes, écarts et risques
   agents.py        agents IA : contexte, invite, garde-fous, exécution
+  termsessions.py  shells SSH persistants : tampon, rattachement, expiration
+  remediation.py   règles d'auto-remédiation : délai, repos, quota
+  notify.py        notifications SMTP, déclencheurs et anti-rafale
   scheduler.py     ordonnanceur cron des actions de maintenance
   discovery.py     balayage TCP et empreinte des services
   migrations.py    évolutions de schéma idempotentes, jouées au démarrage
@@ -259,10 +331,11 @@ api/app/
   routers/         API REST + WebSockets (flux, terminal, scan)
 web/src/
   lib/live.ts      client WebSocket + tampons circulaires par métrique
-  components/      graphiques uPlot, terminal, palette de commandes ⌘K
-  pages/           tableau de bord, inventaire, monitoring, sécurité,
-                   sauvegardes, domotique, Proxmox, hors-bande,
-                   conteneurs, planificateur…
+  components/      graphiques uPlot, terminal, console noVNC,
+                   palette de commandes ⌘K
+  pages/           tableau de bord, inventaire, monitoring, réseau,
+                   sécurité, sauvegardes, domotique, Proxmox, hors-bande,
+                   conteneurs, agents IA, auto-remédiation, planificateur…
 db/init/           schéma TimescaleDB initial
 ```
 

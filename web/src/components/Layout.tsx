@@ -10,6 +10,7 @@ import {
   Cpu,
   Gauge,
   Globe,
+  Network,
   House,
   HardDrive,
   LayoutDashboard,
@@ -24,8 +25,11 @@ import {
   Settings,
   Sparkles,
   TerminalSquare,
+  Menu,
+  Wand2,
   Wifi,
   WifiOff,
+  X,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -41,10 +45,12 @@ const NAV = [
   { to: '/hosts', label: 'Hôtes', icon: Server },
   { to: '/inventory', label: 'Inventaire', icon: Library },
   { to: '/monitoring', label: 'Monitoring', icon: Gauge },
+  { to: '/network', label: 'Réseau', icon: Network },
   { to: '/containers', label: 'Conteneurs', icon: Boxes },
   { to: '/services', label: 'Services web', icon: Globe },
   { to: '/ai', label: 'IA & accélérateurs', icon: Sparkles },
   { to: '/agents', label: 'Agents IA', icon: Bot },
+  { to: '/remediation', label: 'Auto-remédiation', icon: Wand2 },
   { to: '/proxmox', label: 'Proxmox', icon: ServerCog },
   { to: '/synology', label: 'Synology', icon: HardDrive },
   { to: '/ipmi', label: 'Hors-bande', icon: CircuitBoard },
@@ -61,6 +67,9 @@ const NAV = [
 export function Layout() {
   const [collapsed, setCollapsed] = useLocalState('mba.sidebar', false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  // Sur téléphone et tablette en portrait, la barre latérale devient un tiroir :
+  // 228 px pris en permanence sur 390 px de large, ce serait la moitié de l'écran.
+  const [drawer, setDrawer] = useState(false)
   const connected = useLive((s) => s.connected)
   const toastAlert = useLive((s) => s.toastAlert)
   const navigate = useNavigate()
@@ -88,6 +97,11 @@ export function Layout() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Naviguer referme le tiroir : sinon il masque la page qu'on vient d'ouvrir.
+  useEffect(() => {
+    setDrawer(false)
+  }, [location.pathname])
+
   // Une alerte qui vient de tomber invalide la vue d'ensemble.
   useEffect(() => {
     if (toastAlert) queryClient.invalidateQueries({ queryKey: ['overview'] })
@@ -112,10 +126,21 @@ export function Layout() {
 
   return (
     <div className="flex h-full bg-ink-900">
+      {drawer && (
+        <div
+          className="fixed inset-0 z-40 bg-ink-950/70 backdrop-blur-sm lg:hidden"
+          onClick={() => setDrawer(false)}
+        />
+      )}
+
       <aside
         className={clsx(
-          'shrink-0 border-r border-ink-800 bg-ink-950/60 flex flex-col transition-[width] duration-200',
-          collapsed ? 'w-[62px]' : 'w-[228px]',
+          'shrink-0 border-r border-ink-800 bg-ink-950/95 lg:bg-ink-950/60 flex flex-col',
+          'transition-transform duration-200 lg:transition-[width]',
+          'fixed inset-y-0 left-0 z-50 w-[264px] lg:static lg:z-auto lg:translate-x-0',
+          'pb-[env(safe-area-inset-bottom)]',
+          drawer ? 'translate-x-0' : '-translate-x-full',
+          collapsed ? 'lg:w-[62px]' : 'lg:w-[228px]',
         )}
       >
         <div className="h-14 flex items-center gap-2.5 px-4 border-b border-ink-800">
@@ -128,6 +153,9 @@ export function Layout() {
               <div className="text-[10px] text-ink-500 leading-tight">Infrastructure</div>
             </div>
           )}
+          <button className="btn-icon ml-auto lg:hidden" onClick={() => setDrawer(false)} aria-label="Fermer le menu">
+            <X size={17} />
+          </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
@@ -150,19 +178,19 @@ export function Layout() {
                 <>
                   {isActive && <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-accent" />}
                   <Icon size={17} className="shrink-0" />
-                  {!collapsed && <span className="truncate">{label}</span>}
-                  {!collapsed && to === '/events' && alertCount > 0 && (
-                    <Badge tone="danger" className="ml-auto">
+                  <span className={clsx('truncate', collapsed && 'lg:hidden')}>{label}</span>
+                  {to === '/events' && alertCount > 0 && (
+                    <Badge tone="danger" className={clsx('ml-auto', collapsed && 'lg:hidden')}>
                       {alertCount}
                     </Badge>
                   )}
-                  {!collapsed && to === '/security' && criticalFindings > 0 && (
-                    <Badge tone="danger" className="ml-auto">
+                  {to === '/security' && criticalFindings > 0 && (
+                    <Badge tone="danger" className={clsx('ml-auto', collapsed && 'lg:hidden')}>
                       {criticalFindings}
                     </Badge>
                   )}
-                  {!collapsed && to === '/hosts' && offline > 0 && (
-                    <Badge tone="danger" className="ml-auto">
+                  {to === '/hosts' && offline > 0 && (
+                    <Badge tone="danger" className={clsx('ml-auto', collapsed && 'lg:hidden')}>
                       {offline}
                     </Badge>
                   )}
@@ -175,7 +203,7 @@ export function Layout() {
         <div className="p-2 border-t border-ink-800 space-y-0.5">
           <button
             onClick={() => setCollapsed(!collapsed)}
-            className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-mist-400 hover:text-mist-100 hover:bg-ink-800 transition-colors"
+            className="w-full hidden lg:flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-mist-400 hover:text-mist-100 hover:bg-ink-800 transition-colors"
           >
             <ChevronsLeft size={17} className={clsx('shrink-0 transition-transform', collapsed && 'rotate-180')} />
             {!collapsed && <span>Réduire</span>}
@@ -191,19 +219,35 @@ export function Layout() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 shrink-0 border-b border-ink-800 bg-ink-900/80 backdrop-blur flex items-center gap-3 px-4 sticky top-0 z-30">
+        <header className="h-14 shrink-0 border-b border-ink-800 bg-ink-900/80 backdrop-blur flex items-center gap-2 sm:gap-3 px-3 sm:px-4 sticky top-0 z-30 pt-[env(safe-area-inset-top)] h-[calc(3.5rem+env(safe-area-inset-top))]">
+          <button
+            className="btn-icon lg:hidden shrink-0"
+            onClick={() => setDrawer(true)}
+            aria-label="Ouvrir le menu"
+          >
+            <Menu size={19} />
+          </button>
+
           <button
             onClick={() => setPaletteOpen(true)}
-            className="flex items-center gap-2 text-sm text-ink-500 bg-ink-850 border border-ink-750 rounded-lg px-3 py-1.5 hover:border-ink-600 hover:text-mist-300 transition-colors min-w-[13rem]"
+            className="flex items-center gap-2 text-sm text-ink-500 bg-ink-850 border border-ink-750 rounded-lg px-3 py-1.5 hover:border-ink-600 hover:text-mist-300 transition-colors sm:min-w-[13rem]"
           >
-            <Radar size={14} />
-            <span className="flex-1 text-left">Rechercher…</span>
-            <kbd className="text-[10px] font-mono bg-ink-800 border border-ink-700 rounded px-1.5 py-0.5">⌘K</kbd>
+            <Radar size={14} className="shrink-0" />
+            <span className="flex-1 text-left hidden sm:block">Rechercher…</span>
+            <kbd className="text-[10px] font-mono bg-ink-800 border border-ink-700 rounded px-1.5 py-0.5 hidden sm:block">
+              ⌘K
+            </kbd>
           </button>
+
+          {/* Sur mobile, le titre de la page tient lieu de repère. */}
+          <span className="lg:hidden text-sm font-semibold text-mist-100 truncate">
+            {NAV.find((n) => (n.end ? location.pathname === n.to : location.pathname.startsWith(n.to)))
+              ?.label ?? 'MyBeautifulAdmin'}
+          </span>
 
           <div className="flex-1" />
 
-          <div className="hidden md:flex items-center gap-3 text-xs">
+          <div className="hidden xl:flex items-center gap-3 text-xs">
             <span className="flex items-center gap-1.5 text-mist-400">
               <Cpu size={13} className="text-ink-500" />
               <span className="metric-value">{(overview?.summary?.cpu_avg ?? 0).toFixed(0)}%</span>
@@ -223,7 +267,12 @@ export function Layout() {
             </NavLink>
           </div>
 
-          <span className="w-px h-4 bg-ink-750 hidden md:block" />
+          <NavLink to="/events" className="xl:hidden flex items-center gap-1 shrink-0">
+            <Bell size={15} className={alertCount ? 'text-danger' : 'text-ink-500'} />
+            {alertCount > 0 && <span className="metric-value text-xs text-danger">{alertCount}</span>}
+          </NavLink>
+
+          <span className="w-px h-4 bg-ink-750 hidden xl:block" />
 
           <span
             className={clsx(
@@ -237,7 +286,7 @@ export function Layout() {
           </span>
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto overscroll-y-contain pb-[env(safe-area-inset-bottom)]">
           <ErrorBoundary key={location.pathname} label="Cette page">
             <Outlet />
           </ErrorBoundary>

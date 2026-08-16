@@ -6,7 +6,7 @@ import { Chart, LiveChart, PALETTE } from '@/components/Chart'
 import { Page, PageHeader, SectionTitle } from '@/components/PageHeader'
 import { Badge, Bar, Empty, Spinner, StatTile, StatusDot, Tabs, useLocalState } from '@/components/ui'
 import { get } from '@/lib/api'
-import { bitrate, percent, severity } from '@/lib/format'
+import { bitrate, num, percent, severity } from '@/lib/format'
 import { useLive } from '@/lib/live'
 
 type Tab = 'live' | 'compare' | 'sensors'
@@ -126,7 +126,7 @@ function LiveWall() {
                     className="metric-value text-xs"
                     style={{ color: severity(sample['temp.cpu'], 70, 85).color }}
                   >
-                    {sample['temp.cpu'].toFixed(0)}°
+                    {num(sample['temp.cpu'], 0)}°
                   </span>
                 )}
               </div>
@@ -409,7 +409,7 @@ function SensorsView() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatTile
           label="Point le plus chaud"
-          value={summary.hottest ? `${summary.hottest.value.toFixed(0)} °C` : '—'}
+          value={summary.hottest ? `${num(summary.hottest.value, 0)} °C` : '—'}
           sub={summary.hottest ? `${summary.hottest.label} · ${summary.hottest.host_name}` : undefined}
           tone={
             (summary.hottest?.value ?? 0) >= 85 ? 'danger' : (summary.hottest?.value ?? 0) >= 70 ? 'warn' : 'ok'
@@ -490,10 +490,10 @@ function SensorsView() {
                   }}
                 >
                   {reading.kind === 'temperature'
-                    ? `${reading.value.toFixed(1)} °C`
+                    ? `${num(reading.value, 1)} °C`
                     : reading.kind === 'fan'
-                      ? `${reading.value.toFixed(0)} rpm`
-                      : `${reading.value.toFixed(1)} W`}
+                      ? `${num(reading.value, 0)} rpm`
+                      : `${num(reading.value, 1)} W`}
                 </div>
                 {reading.kind === 'temperature' && (
                   <Bar value={Math.min(100, (reading.value / 100) * 100)} height={3} warn={70} crit={85} />

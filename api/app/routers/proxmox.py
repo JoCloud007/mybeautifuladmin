@@ -2,17 +2,25 @@
 clonage, migration et ajustement des ressources."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
+import logging
 import re
+import secrets
+import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, status
 from pydantic import BaseModel, Field
 
 from ..bus import bus
 from ..collectors.proxmox import ProxmoxError, client_for_host
 from ..db import execute, fetch_all, fetch_one
 from ..poller import log_event, supervisor
-from ..security import current_user
+from ..security import current_user, ws_user
+
+log = logging.getLogger("mba.pve")
 
 router = APIRouter(prefix="/proxmox", tags=["proxmox"])
 
@@ -136,10 +144,16 @@ async def guest_detail(host_id: int, kind: GuestKind, vmid: int,
     finally:
         await client.close()
 
+    sample = bus.latest(f"metrics.{host_id}").get(f"metrics.{host_id}", {})
+    live = next((g for g in (sample.get("guests") or [])
+                 if g.get("vmid") == vmid and g.get("type") == kind), {})
+
     return {
         "node": node,
         "vmid": vmid,
         "kind": kind,
+        "status": live.get("status"),
+        "live": {k: live.get(k) for k in ("cpu", "mem", "maxmem", "mem_percent", "uptime")},
         "config": _readable_config(config, kind),
         "raw_config": config,
         "snapshots": [s for s in snapshots if not s["current"]],
@@ -310,6 +324,236 @@ async def node_power(host_id: int, node: str, action: str,
     await log_event(host_id, "critical", "proxmox",
                     f"{action} du nœud {node} demandé par {user['username']}")
     return {"ok": True}
+
+
+# ------------------------------------------------------------------ console
+@router.websocket("/{host_id}/console/{kind}/{vmid}")
+async def console(websocket: WebSocket, host_id: int, kind: str, vmid: int) -> None:
+    """Relaie la console Proxmox jusqu'au navigateur.
+
+    Le navigateur ne peut pas parler directement à Proxmox : il n'a ni le jeton
+    d'API, ni un certificat accepté. MBA ouvre donc le canal côté PVE avec ses
+    propres identifiants et fait transiter les octets dans les deux sens.
+    """
+    await websocket.accept()
+    try:
+        await ws_user(websocket, websocket.query_params.get("token"))
+    except Exception:  # noqa: BLE001
+        return
+
+    host = await fetch_one("SELECT * FROM hosts WHERE id = :id AND kind = 'proxmox'",
+                           {"id": host_id})
+    if not host:
+        await websocket.send_text(json.dumps({"t": "e", "d": "Hyperviseur introuvable\r\n"}))
+        await websocket.close(code=4404)
+        return
+
+    client = await client_for_host(host)
+    upstream = None
+    try:
+        node = websocket.query_params.get("node") or await _node_of(host, kind, vmid)
+        ticket = await client.term_ticket(node, kind, vmid)
+        url = client.websocket_url(node, ticket["port"], ticket["ticket"], kind, vmid)
+
+        import ssl as ssl_mod
+
+        import websockets
+
+        context = ssl_mod.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl_mod.CERT_NONE
+
+        upstream = await websockets.connect(
+            url, ssl=context, additional_headers=client.auth_header(),
+            open_timeout=15, max_size=None,
+        )
+        # Proxmox attend « user:ticket\n » comme première trame.
+        await upstream.send(f"{ticket['user']}:{ticket['ticket']}\n")
+        await websocket.send_text(json.dumps({
+            "t": "o", "d": f"\x1b[38;5;44m● Console {kind} {vmid} sur {node}\x1b[0m\r\n"}))
+    except Exception as exc:  # noqa: BLE001
+        await websocket.send_text(json.dumps({
+            "t": "e", "d": f"\x1b[31m✖ {str(exc)[:400]}\x1b[0m\r\n"}))
+        await websocket.close(code=4500)
+        await client.close()
+        return
+
+    async def pump_down() -> None:
+        try:
+            async for message in upstream:
+                text = message.decode("utf-8", "replace") if isinstance(message, bytes) else message
+                await websocket.send_text(json.dumps({"t": "o", "d": text}))
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def pump_up() -> None:
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                try:
+                    message = json.loads(raw)
+                except json.JSONDecodeError:
+                    await upstream.send(raw)
+                    continue
+                if message.get("t") == "i":
+                    # Protocole Proxmox : longueur puis contenu.
+                    payload = message.get("d", "")
+                    await upstream.send(f"0:{len(payload)}:{payload}")
+                elif message.get("t") == "r":
+                    await upstream.send(f"1:{message.get('cols', 120)}:{message.get('rows', 32)}:")
+                elif message.get("t") == "ping":
+                    await upstream.send("2")
+        except Exception:  # noqa: BLE001
+            pass
+
+    tasks = [asyncio.create_task(pump_down()), asyncio.create_task(pump_up())]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in tasks:
+            task.cancel()
+        with contextlib.suppress(Exception):
+            await upstream.close()
+        with contextlib.suppress(Exception):
+            await websocket.close()
+        await client.close()
+
+
+# Tickets VNC en attente de leur WebSocket.
+#
+# Chaque appel à `vncproxy` démarre une *nouvelle* session VNC sur un nouveau
+# port : demander un ticket pour le mot de passe RFB puis un second pour ouvrir
+# le canal donnerait deux sessions distinctes, et le mot de passe ne
+# correspondrait pas. Le ticket est donc créé une fois, remis au client pour la
+# poignée de main, et consommé par le WebSocket qui suit.
+_PENDING_VNC: dict[str, dict] = {}
+VNC_TICKET_TTL = 60.0
+
+
+def _sweep_vnc() -> None:
+    now = time.monotonic()
+    for key, entry in list(_PENDING_VNC.items()):
+        if now - entry["created"] > VNC_TICKET_TTL:
+            _PENDING_VNC.pop(key, None)
+
+
+@router.get("/{host_id}/guests/{kind}/{vmid}/vnc")
+async def vnc_info(host_id: int, kind: GuestKind, vmid: int,
+                   user: dict = Depends(current_user)) -> dict:
+    """Ticket VNC + lien noVNC natif, pour l'écran graphique d'une VM.
+
+    Le mot de passe RFB *est* le ticket : le client noVNC embarqué dans MBA le
+    présente pendant la poignée de main. Il ne vaut qu'une minute, pour ce seul
+    invité, et pour une seule ouverture de canal.
+    """
+    host = await _require_pve(host_id)
+    node = await _node_of(host, kind, vmid)
+    client = await client_for_host(host)
+    try:
+        ticket = await client.vnc_ticket(node, kind, vmid)
+        console = client.console_url(node, kind, vmid)
+    except ProxmoxError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    finally:
+        await client.close()
+
+    _sweep_vnc()
+    handle = secrets.token_urlsafe(12)
+    _PENDING_VNC[handle] = {
+        "host_id": host_id, "kind": kind, "vmid": vmid, "node": node,
+        "ticket": ticket["ticket"], "port": ticket["port"],
+        "created": time.monotonic(),
+    }
+    return {"node": node, "url": console, "password": ticket["ticket"], "handle": handle}
+
+
+@router.websocket("/{host_id}/vnc/{kind}/{vmid}")
+async def vnc_console(websocket: WebSocket, host_id: int, kind: str, vmid: int) -> None:
+    """Relaie l'écran graphique (RFB) d'un invité jusqu'au client noVNC.
+
+    Même raison que pour la console texte : le navigateur n'a ni le jeton d'API
+    ni un certificat PVE accepté, et un iframe vers l'interface Proxmox se
+    heurterait en plus à sa propre session. On relaie donc le flux RFB brut —
+    en binaire, sans y toucher — et noVNC dessine dans un canvas de la page.
+    """
+    await websocket.accept(subprotocol="binary")
+    try:
+        await ws_user(websocket, websocket.query_params.get("token"))
+    except Exception:  # noqa: BLE001
+        return
+
+    host = await fetch_one("SELECT * FROM hosts WHERE id = :id AND kind = 'proxmox'",
+                           {"id": host_id})
+    if not host:
+        await websocket.close(code=4404)
+        return
+
+    # Le ticket doit être celui remis au client : c'est la même session VNC.
+    _sweep_vnc()
+    pending = _PENDING_VNC.pop(websocket.query_params.get("handle") or "", None)
+    if not pending or pending["vmid"] != vmid or pending["host_id"] != host_id:
+        log.warning("Console VNC %s/%s : ticket absent ou périmé", kind, vmid)
+        await websocket.close(code=4401, reason="Ticket VNC expiré, rouvre la console")
+        return
+
+    client = await client_for_host(host)
+    upstream = None
+    try:
+        node = pending["node"]
+        url = client.websocket_url(node, pending["port"], pending["ticket"], kind, vmid)
+
+        import ssl as ssl_mod
+
+        import websockets
+
+        context = ssl_mod.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl_mod.CERT_NONE
+
+        upstream = await websockets.connect(
+            url, ssl=context, additional_headers=client.auth_header(),
+            subprotocols=["binary"], open_timeout=15, max_size=None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Console VNC %s/%s indisponible : %s", kind, vmid, exc)
+        await websocket.close(code=4500, reason=str(exc)[:120])
+        await client.close()
+        return
+
+    async def pump_down() -> None:
+        try:
+            async for message in upstream:
+                if isinstance(message, str):
+                    message = message.encode()
+                await websocket.send_bytes(message)
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def pump_up() -> None:
+        try:
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    break
+                data = message.get("bytes")
+                if data is None and message.get("text") is not None:
+                    data = message["text"].encode()
+                if data:
+                    await upstream.send(data)
+        except Exception:  # noqa: BLE001
+            pass
+
+    tasks = [asyncio.create_task(pump_down()), asyncio.create_task(pump_up())]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in tasks:
+            task.cancel()
+        with contextlib.suppress(Exception):
+            await upstream.close()
+        with contextlib.suppress(Exception):
+            await websocket.close()
+        await client.close()
 
 
 # ------------------------------------------------------------------ helpers

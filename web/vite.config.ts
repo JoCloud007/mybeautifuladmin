@@ -29,6 +29,9 @@ export default defineConfig({
           vendor: ['react', 'react-dom', 'react-router-dom'],
           charts: ['uplot'],
           term: ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
+          // noVNC ne sert qu'à l'écran graphique d'une VM : inutile de
+          // le charger pour consulter un tableau de bord.
+          vnc: ['@novnc/novnc/lib/rfb'],
         },
       },
     },

@@ -1,17 +1,18 @@
 import clsx from 'clsx'
-import { ArrowDown, ArrowUp, Boxes, Cpu, HardDrive, MemoryStick, Thermometer } from 'lucide-react'
+import { ArrowDown, ArrowUp, Boxes, Cpu, HardDrive, MemoryStick, Thermometer, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Sparkline } from './Chart'
 import { Badge, Bar, StatusDot } from './ui'
-import { bitrate, duration, KIND_LABEL, percent, severity } from '@/lib/format'
+import { KIND_LABEL, bitrate, duration, num, percent, severity } from '@/lib/format'
 import { useLive } from '@/lib/live'
 
-const KIND_TONE: Record<string, 'ok' | 'info' | 'violet' | 'warn' | 'neutral'> = {
+const KIND_TONE: Record<string, 'ok' | 'info' | 'violet' | 'warn' | 'danger' | 'neutral'> = {
   linux: 'info',
   proxmox: 'violet',
   synology: 'warn',
   docker: 'ok',
   generic: 'neutral',
+  ipmi: 'danger',
 }
 
 export function HostCard({ host }: { host: any }) {
@@ -31,6 +32,9 @@ export function HostCard({ host }: { host: any }) {
   // Un hôte joint uniquement par le socket Docker n'expose pas de métriques
   // système : on bascule alors sur une carte orientée conteneurs.
   const systemMetrics = live['cpu.usage'] !== undefined || live['mem.percent'] !== undefined
+  // Un contrôleur hors bande ne connaît ni charge ni conteneurs : ce qu'il sait
+  // dire, c'est si le serveur est sous tension et si le matériel va bien.
+  const bmc = host.kind === 'ipmi' ? (live.bmc ?? {}) : null
 
   return (
     <Link
@@ -55,6 +59,29 @@ export function HostCard({ host }: { host: any }) {
         <div className="text-xs text-danger bg-danger/8 border border-danger/20 rounded-lg px-2.5 py-2 line-clamp-2">
           {host.last_error || 'Hôte injoignable'}
         </div>
+      ) : bmc ? (
+        <>
+          <div className="grid grid-cols-2 gap-2.5">
+            <Readout
+              label="Alimentation"
+              value={bmc.power_state === 'on' ? 'Allumé' : bmc.power_state === 'off' ? 'Éteint' : '—'}
+            />
+            <Readout label="Santé" value={bmc.health ?? '—'} />
+          </div>
+          <div className="flex items-center gap-3 text-[11px] text-ink-500 font-mono pt-0.5 border-t border-ink-800">
+            <span className="truncate">
+              {bmc.manufacturer ?? 'BMC'}
+              {bmc.bmc_firmware ? ` · fw ${bmc.bmc_firmware}` : ''}
+            </span>
+            <span className="flex-1" />
+            {bmc.power_watts != null && (
+              <span className="flex items-center gap-1" title="Consommation">
+                <Zap size={10} className="text-warn" />
+                {num(bmc.power_watts, 0)} W
+              </span>
+            )}
+          </div>
+        </>
       ) : (
         <>
           {systemMetrics ? (
@@ -96,7 +123,7 @@ export function HostCard({ host }: { host: any }) {
             {temp !== undefined && (
               <span className="flex items-center gap-1" title="Température CPU">
                 <Thermometer size={10} className={temp > 75 ? 'text-danger' : 'text-ink-500'} />
-                {temp.toFixed(0)}°
+                {num(temp, 0)}°
               </span>
             )}
             {containers !== undefined && (

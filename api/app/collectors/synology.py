@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -212,19 +213,138 @@ class SynologyClient:
         }
 
     # ---------------------------------------------------------------- services
-    async def packages(self) -> list[dict]:
-        data = await self.call("SYNO.Core.Package", "list", 2, additional=["status", "version"])
-        return [{
-            "id": p.get("id"),
-            "name": p.get("name") or p.get("id"),
-            "version": p.get("version"),
-            "status": p.get("additional", {}).get("status") or p.get("status"),
-        } for p in (data.get("packages") or [])]
+    async def packages(self) -> dict[str, Any]:
+        """Paquets installés, leur état et les mises à jour disponibles.
+
+        DSM répond 120 (« paramètre invalide ») dès qu'un champ `additional`
+        inconnu est demandé — `version` et `description` en font partie, alors
+        même que ces valeurs figurent dans la réponse. Seuls `status`,
+        `install_type`, `startable` et `dsm_apps` sont acceptés. On négocie donc
+        la version déclarée par SYNO.API.Info, puis on dégrade les paramètres
+        jusqu'à obtenir une réponse.
+        """
+        apis = await self.available_apis()
+        version = self._api_version(apis, "SYNO.Core.Package", 2)
+        if version is None:
+            return {
+                "packages": [], "updates": [],
+                "reason": "L'API des paquets n'est pas exposée par ce DSM.",
+            }
+
+        # De la requête la plus riche à la plus dépouillée.
+        attempts: list[tuple[int, dict]] = []
+        for candidate in (version, 2, 1):
+            attempts.append((candidate, {"additional": ["status", "install_type", "startable"]}))
+            attempts.append((candidate, {"additional": ["status"]}))
+            attempts.append((candidate, {}))
+
+        data, errors, used = None, [], None
+        seen = set()
+        for candidate, params in attempts:
+            # La clé porte aussi les valeurs : deux requêtes qui ne diffèrent que
+            # par le contenu d'`additional` restent deux essais distincts.
+            key = (candidate, json.dumps(params, sort_keys=True))
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                data = await self.call("SYNO.Core.Package", "list", candidate, **params)
+                if data:
+                    used = f"v{candidate} {'+'.join(params) or 'sans parametre'}"
+                    break
+            except SynologyError as exc:
+                errors.append(str(exc))
+                continue
+
+        if not data:
+            return {
+                "packages": [], "updates": [],
+                "reason": "DSM a refuse la lecture des paquets. Le compte utilise doit etre "
+                          "administrateur. " + (errors[0] if errors else ""),
+            }
+
+        packages = []
+        for pkg in (data.get("packages") or []):
+            extra = pkg.get("additional") or {}
+            packages.append({
+                "id": pkg.get("id"),
+                "name": pkg.get("name") or pkg.get("dname") or pkg.get("id"),
+                "version": extra.get("version") or pkg.get("version"),
+                "status": extra.get("status") or pkg.get("status"),
+                "description": pkg.get("description") or extra.get("status_description"),
+                "startable": extra.get("startable", True),
+                "removable": pkg.get("removable", True),
+            })
+        packages.sort(key=lambda p: (p["status"] != "running", (p["name"] or "").lower()))
+
+        return {"packages": packages, "updates": await self._package_updates(apis, packages),
+                "api": used, "reason": None}
+
+    @staticmethod
+    def _version_key(version: str | None) -> tuple[int, ...]:
+        """« 1.102.2-700102002 » → (1, 102, 2, 700102002), comparable numériquement.
+
+        Une comparaison de chaînes classerait 1.102 avant 1.58, et ferait passer
+        un paquet à jour pour une régression.
+        """
+        return tuple(int(part) for part in re.findall(r"\d+", version or "")) or (0,)
+
+    async def _package_updates(self, apis: dict, installed: list[dict]) -> list[dict]:
+        """Paquets dont le catalogue Synology propose une version plus récente.
+
+        Le catalogue ne porte aucun indicateur de mise à jour : il liste ce que
+        Synology publie, à charge pour nous de comparer avec ce qui tourne. Un
+        paquet installé à la main peut d'ailleurs devancer le catalogue — on ne
+        propose donc jamais de « mise à jour » vers une version antérieure.
+        """
+        version = self._api_version(apis, "SYNO.Core.Package.Server", 2)
+        if version is None:
+            return []
+        current = {p["id"]: p for p in installed if p.get("id")}
+        for params in ({"blforcereload": False, "blloadothers": False}, {}):
+            try:
+                data = await self.call("SYNO.Core.Package.Server", "list", version, **params)
+            except SynologyError:
+                continue
+            catalog = (data or {}).get("packages") or []
+            if not catalog:
+                continue
+            out = []
+            for pkg in catalog:
+                local = current.get(pkg.get("id"))
+                if not local or pkg.get("beta"):
+                    continue
+                if self._version_key(pkg.get("version")) <= self._version_key(local.get("version")):
+                    continue
+                out.append({
+                    "id": pkg.get("id"),
+                    "name": pkg.get("dname") or pkg.get("id"),
+                    "version": pkg.get("version"),
+                    "installed_version": local.get("version"),
+                    "security": bool(pkg.get("is_security_version")),
+                    "changelog": pkg.get("changelog"),
+                })
+            out.sort(key=lambda p: p["name"].lower())
+            return out
+        return []
 
     async def package_action(self, package_id: str, action: str) -> Any:
         if action not in ("start", "stop"):
             raise SynologyError(f"Action paquet inconnue: {action}")
         return await self.call("SYNO.Core.Package.Control", action, 1, id=package_id)
+
+    async def upgrade_package(self, package_id: str) -> dict[str, Any]:
+        """Declenche la mise a jour d'un paquet depuis le catalogue Synology."""
+        apis = await self.available_apis()
+        version = self._api_version(apis, "SYNO.Core.Package.Installation", 1)
+        if version is None:
+            raise SynologyError(
+                "L'API d'installation des paquets n'est pas exposee par ce DSM. "
+                "Passe par le Centre de paquets."
+            )
+        data = await self.call("SYNO.Core.Package.Installation", "upgrade", version,
+                               packages=[package_id], type=0)
+        return {"task": data, "package": package_id}
 
     async def shares(self) -> list[dict]:
         data = await self.call("SYNO.Core.Share", "list", 1, additional=["size", "volume_status"])
