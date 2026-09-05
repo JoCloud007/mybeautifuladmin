@@ -130,7 +130,8 @@ CREATE TABLE IF NOT EXISTS ai_endpoints (
     name       TEXT NOT NULL,
     url        TEXT NOT NULL,              -- http://10.0.0.5:11434
     host_id    INTEGER REFERENCES hosts(id) ON DELETE SET NULL,
-    kind       TEXT NOT NULL DEFAULT 'ollama',
+    kind       TEXT NOT NULL DEFAULT 'ollama',   -- ollama | openai (vLLM & compatibles)
+    api_key_enc TEXT,                           -- clé d'API chiffrée, si le serveur en exige une
     enabled    BOOLEAN NOT NULL DEFAULT true,
     status     TEXT NOT NULL DEFAULT 'unknown',
     meta       JSONB NOT NULL DEFAULT '{}'::jsonb,

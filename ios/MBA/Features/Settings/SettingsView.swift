@@ -171,10 +171,8 @@ private struct AboutView: View {
     var body: some View {
         List {
             Section {
-                VStack(spacing: 8) {
-                    Image(systemName: "server.rack")
-                        .font(.system(size: 42, weight: .light))
-                        .foregroundStyle(.tint)
+                VStack(spacing: 10) {
+                    BrandMark(size: 72)
                     Text("MyBeautifulAdmin")
                         .font(.title3.weight(.semibold))
                     Text("Version \(version)")

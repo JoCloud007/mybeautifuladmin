@@ -4,7 +4,7 @@ import { Activity, Check, Fan, Gauge as GaugeIcon, Thermometer, Zap } from 'luci
 import { useMemo, useState } from 'react'
 import { Chart, LiveChart, PALETTE } from '@/components/Chart'
 import { Page, PageHeader, SectionTitle } from '@/components/PageHeader'
-import { Badge, Bar, Empty, Spinner, StatTile, StatusDot, Tabs, useLocalState } from '@/components/ui'
+import { Badge, Bar, Empty, Spinner, StatTile, StatusDot, Tabs, TagFilter, useLocalState } from '@/components/ui'
 import { get } from '@/lib/api'
 import { bitrate, num, percent, severity } from '@/lib/format'
 import { useLive } from '@/lib/live'
@@ -59,7 +59,8 @@ const WALL_METRICS = [
 
 function LiveWall() {
   const [density, setDensity] = useLocalState<'compact' | 'detailed'>('mba.monDensity', 'compact')
-  const { data: hosts = [] } = useQuery({
+  const [tagFilter, setTagFilter] = useLocalState<string[]>('mba.monTags', [])
+  const { data: allHosts = [] } = useQuery({
     queryKey: ['hosts'],
     queryFn: () => get('/hosts'),
     refetchInterval: 30000,
@@ -67,9 +68,20 @@ function LiveWall() {
   useLive((s) => s.bump)
   const samples = useLive.getState().samples
 
+  const tags = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const host of allHosts) for (const tag of host.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    return [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
+  }, [allHosts])
+
+  const hosts = tagFilter.length
+    ? allHosts.filter((host: any) => tagFilter.some((tag) => (host.tags ?? []).includes(tag)))
+    : allHosts
   const online = hosts.filter((h: any) => h.status === 'online')
 
-  if (hosts.length === 0) {
+  if (allHosts.length === 0) {
     return (
       <div className="panel">
         <Empty icon={<Activity size={38} />} title="Aucun hôte supervisé" />
@@ -102,6 +114,7 @@ function LiveWall() {
         <span className="text-xs text-ink-600">
           {online.length} machine(s) en ligne · flux direct
         </span>
+        <TagFilter tags={tags} selected={tagFilter} onChange={setTagFilter} className="ml-auto" />
       </div>
 
       <div
@@ -240,6 +253,22 @@ function CompareView() {
     setSelectedHosts(
       selectedHosts.includes(id) ? selectedHosts.filter((h) => h !== id) : [...selectedHosts, id],
     )
+
+  const hostTags = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const host of hosts) for (const tag of host.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    return [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
+  }, [hosts])
+
+  /** Recliquer sur la même étiquette remet la sélection à zéro (= tout comparer). */
+  const selectByTag = (tag: string) => {
+    const ids = hosts.filter((h: any) => (h.tags ?? []).includes(tag)).map((h: any) => h.id)
+    const already =
+      ids.length === selectedHosts.length && ids.every((id: number) => selectedHosts.includes(id))
+    setSelectedHosts(already ? [] : ids)
+  }
   const toggleMetric = (metric: string) =>
     setSelectedMetrics(
       selectedMetrics.includes(metric)
@@ -250,6 +279,25 @@ function CompareView() {
   return (
     <div className="space-y-4">
       <div className="panel p-4 space-y-3">
+        {/* Comparer « toute la prod » d'un clic plutôt que machine par machine. */}
+        {hostTags.length > 0 && (
+          <div className="space-y-1.5">
+            <label>Sélectionner par étiquette</label>
+            <div className="flex flex-wrap gap-1.5">
+              {hostTags.map((entry) => (
+                <button
+                  key={entry.tag}
+                  onClick={() => selectByTag(entry.tag)}
+                  className="chip border-ink-700 bg-ink-850 text-mist-400 hover:text-accent hover:border-accent/30 transition-colors"
+                >
+                  {entry.tag}
+                  <span className="text-ink-500 ml-0.5">{entry.count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <label>Machines</label>
           <div className="flex flex-wrap gap-1.5">

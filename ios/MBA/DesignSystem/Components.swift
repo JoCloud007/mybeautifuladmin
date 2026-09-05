@@ -92,6 +92,38 @@ struct MetricRing: View {
     }
 }
 
+/// Note sur 100 — le sens est inversé par rapport à `MetricRing` : l'anneau est
+/// plein et vert quand tout va bien, vide et rouge quand rien ne va.
+///
+/// Sert au score de sécurité comme au taux de couverture des sauvegardes.
+struct ScoreRing: View {
+    let score: Int
+    var size: CGFloat = 48
+    var label: String = "Score"
+
+    private var fraction: Double { min(max(Double(score) / 100, 0), 1) }
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(.quaternary, lineWidth: size * 0.11)
+            Circle()
+                .trim(from: 0, to: fraction)
+                .stroke(Palette.score(score),
+                        style: StrokeStyle(lineWidth: size * 0.11, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.smooth(duration: 0.45), value: fraction)
+            Text("\(score)")
+                .font(.system(size: size * 0.34, weight: .semibold, design: .rounded))
+                .contentTransition(.numericText())
+                .monospacedDigit()
+        }
+        .frame(width: size, height: size)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue("\(score) sur 100")
+    }
+}
+
 /// Barre horizontale — plus lisible qu'un anneau dès qu'il y a une légende
 /// (systèmes de fichiers, volumes, datastores).
 struct MetricBar: View {

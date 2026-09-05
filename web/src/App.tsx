@@ -3,6 +3,7 @@ import { Layout } from './components/Layout'
 import { getToken } from './lib/api'
 import { AgentsPage } from './pages/Agents'
 import { AiPage } from './pages/Ai'
+import { CloudPage } from './pages/Cloud'
 import { ContainersPage } from './pages/Containers'
 import { Dashboard } from './pages/Dashboard'
 import { DiscoveryPage } from './pages/Discovery'
@@ -24,6 +25,7 @@ import { ServicesPage } from './pages/Services'
 import { SettingsPage } from './pages/Settings'
 import { SynologyPage } from './pages/Synology'
 import { TerminalPage } from './pages/Terminal'
+import { UpdatesPage } from './pages/Updates'
 
 function Protected({ children }: { children: React.ReactNode }) {
   if (!getToken()) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />
@@ -47,10 +49,12 @@ export function App() {
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/monitoring" element={<MonitoringPage />} />
         <Route path="/network" element={<NetworkPage />} />
+        <Route path="/cloud" element={<CloudPage />} />
         <Route path="/security" element={<SecurityPage />} />
         <Route path="/protection" element={<ProtectionPage />} />
         <Route path="/home" element={<HomeAutomationPage />} />
         <Route path="/containers" element={<ContainersPage />} />
+        <Route path="/updates" element={<UpdatesPage />} />
         <Route path="/services" element={<ServicesPage />} />
         <Route path="/ai" element={<AiPage />} />
         <Route path="/agents" element={<AgentsPage />} />

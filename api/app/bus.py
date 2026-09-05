@@ -20,9 +20,13 @@ class EventBus:
     # ---------------------------------------------------------------- publish
     def publish(self, topic: str, payload: dict[str, Any]) -> None:
         message = {"topic": topic, "data": payload}
+        # Le tampon circulaire ne sert qu'aux courbes, donc aux métriques ; le
+        # dernier état, lui, vaut pour tous les topics : c'est ce que lisent les
+        # vues de synthèse (IA, conteneurs…) au premier affichage, avant que le
+        # flux temps réel ne prenne le relais.
         if topic.startswith("metrics."):
             self._buffers[topic].append(payload)
-            self._latest[topic] = payload
+        self._latest[topic] = payload
         for queue in list(self._subs):
             if queue.qsize() >= MAX_QUEUE:
                 with contextlib.suppress(asyncio.QueueEmpty):

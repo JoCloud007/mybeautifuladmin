@@ -37,10 +37,8 @@ struct RootView: View {
 
 private struct LaunchView: View {
     var body: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "server.rack")
-                .font(.system(size: 46, weight: .light))
-                .foregroundStyle(.tint)
+        VStack(spacing: 22) {
+            BrandMark(size: 88)
             ProgressView()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -71,7 +69,11 @@ struct MainShell: View {
 private struct PhoneTabs: View {
     @State private var selection: Destination = {
         #if DEBUG
-        if let screen = DebugLaunch.startScreen, Destination.primary.contains(screen) { return screen }
+        if let screen = DebugLaunch.startScreen {
+            // Un écran secondaire vit sous « Plus » : on ouvre cet onglet, la pile
+            // de navigation s'y empile ensuite d'elle-même.
+            return Destination.primary.contains(screen) ? screen : .settings
+        }
         #endif
         return .dashboard
     }()
@@ -95,9 +97,20 @@ private struct PhoneTabs: View {
 /// Toutes les sections secondaires, groupées — l'onglet « Plus » de l'iPhone.
 private struct MoreView: View {
     @Environment(SessionStore.self) private var session
+    /// `NavigationPath` plutôt que `[Destination]` : les écrans de section
+    /// poussent leurs propres valeurs (un service, un constat, un identifiant de
+    /// machine), et un chemin typé les refuserait silencieusement.
+    @State private var path: NavigationPath = {
+        #if DEBUG
+        if let screen = DebugLaunch.startScreen, !Destination.primary.contains(screen) {
+            return NavigationPath([screen])
+        }
+        #endif
+        return NavigationPath()
+    }()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 Section {
                     NavigationLink(value: Destination.settings) {
@@ -186,28 +199,29 @@ struct DestinationView: View {
         switch destination {
         case .dashboard: DashboardView()
         case .hosts: HostsView()
+        case .containers: ContainersView()
         case .alerts: AlertsView()
+        case .monitoring: MonitoringView()
+        case .services: ServicesView()
+        case .security: SecurityView()
+        case .protection: ProtectionView()
+        case .updates: UpdatesView()
+        case .scheduler: SchedulerView()
+        case .proxmox: ProxmoxView()
+        case .synology: SynologyView()
+        case .remediation: RemediationView()
+        case .discovery: DiscoveryView()
+        case .network: NetworkView()
+        case .inventory: InventoryView()
+        case .terminal: TerminalView()
+        case .ipmi: IPMIView()
+        case .home: HomeAutomationView()
+        case .cloud: CloudView()
+        case .ai: AIView()
+        case .agents: AgentsView()
         case .events: EventsView()
         case .settings: SettingsView()
-        default:
-            ComingSoonView(destination: destination)
         }
-    }
-}
-
-/// Marque-place explicite : une section annoncée mais pas encore portée vaut
-/// mieux qu'un onglet qui disparaît d'une version à l'autre.
-struct ComingSoonView: View {
-    let destination: Destination
-
-    var body: some View {
-        ContentUnavailableView {
-            Label(destination.title, systemImage: destination.symbol)
-        } description: {
-            Text("Cette section arrive dans une prochaine version de l'application.\nElle est déjà disponible dans la console web.")
-        }
-        .navigationTitle(destination.title)
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

@@ -1,12 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { LayoutGrid, List, Plus, Search, Server, Trash2, Wifi } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { LayoutGrid, List, Plus, Search, Server, Tag, Trash2, Wifi } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { AddHostModal } from '@/components/AddHostModal'
 import { HostCard } from '@/components/HostCard'
 import { Page, PageHeader } from '@/components/PageHeader'
-import { Badge, Bar, Empty, Modal, Spinner, StatusDot, useConfirm, useLocalState, useToast } from '@/components/ui'
+import {
+  Badge,
+  Bar,
+  Empty,
+  Spinner,
+  StatusDot,
+  TagFilter,
+  TagList,
+  useConfirm,
+  useLocalState,
+  useToast,
+} from '@/components/ui'
 import { del, get, post } from '@/lib/api'
 import { ago, KIND_LABEL, percent } from '@/lib/format'
 import { useLive } from '@/lib/live'
@@ -15,6 +26,8 @@ export function HostsPage() {
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState('all')
+  const [tagFilter, setTagFilter] = useLocalState<string[]>('mba.hostsTags', [])
+  const [byTag, setByTag] = useLocalState('mba.hostsByTag', false)
   const [view, setView] = useLocalState<'grid' | 'list'>('mba.hostsView', 'grid')
   const [addOpen, setAddOpen] = useState(params.get('add') === '1')
   const queryClient = useQueryClient()
@@ -47,12 +60,33 @@ export function HostsPage() {
 
   const filtered = hosts.filter((host: any) => {
     if (kind !== 'all' && host.kind !== kind) return false
+    if (tagFilter.length && !tagFilter.some((tag) => (host.tags ?? []).includes(tag))) return false
     const needle = query.trim().toLowerCase()
     if (!needle) return true
     return `${host.name} ${host.address} ${(host.tags ?? []).join(' ')}`.toLowerCase().includes(needle)
   })
 
   const kinds = ['all', ...new Set(hosts.map((h: any) => h.kind))] as string[]
+
+  const tags = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const host of hosts) for (const tag of host.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    return [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
+  }, [hosts])
+
+  /** Regroupement par étiquette : un hôte multi-étiquettes apparaît sous chacune. */
+  const sections = useMemo(() => {
+    if (!byTag) return [{ tag: '', hosts: filtered }]
+    const map = new Map<string, any[]>()
+    for (const host of filtered)
+      for (const tag of (host.tags ?? []).length ? host.tags : ['~'])
+        map.set(tag, [...(map.get(tag) ?? []), host])
+    return [...map.entries()]
+      .map(([tag, items]) => ({ tag, hosts: items }))
+      .sort((a, b) => (a.tag === '~' ? 1 : b.tag === '~' ? -1 : a.tag.localeCompare(b.tag)))
+  }, [filtered, byTag])
 
   return (
     <Page>
@@ -70,6 +104,16 @@ export function HostsPage() {
                 className="pl-8 py-1.5 w-44"
               />
             </div>
+            {tags.length > 0 && (
+              <button
+                onClick={() => setByTag(!byTag)}
+                className={clsx('btn-ghost', byTag && 'text-accent')}
+                title="Regrouper les hôtes par étiquette"
+              >
+                <Tag size={14} />
+                Par étiquette
+              </button>
+            )}
             <div className="flex bg-ink-850 border border-ink-750 rounded-lg p-0.5">
               {(['grid', 'list'] as const).map((mode) => (
                 <button
@@ -92,6 +136,8 @@ export function HostsPage() {
           </>
         }
       />
+
+      {tags.length > 0 && <TagFilter tags={tags} selected={tagFilter} onChange={setTagFilter} className="mb-3" />}
 
       {kinds.length > 2 && (
         <div className="flex gap-1.5 mb-4 flex-wrap">
@@ -132,35 +178,62 @@ export function HostsPage() {
         </div>
       )}
 
-      {view === 'grid' ? (
-        <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
-          {filtered.map((host: any) => (
-            <HostCard key={host.id} host={host} />
-          ))}
-        </div>
-      ) : (
-        <HostTable hosts={filtered} onDelete={async (host) => {
-          const ok = await confirm({
-            title: 'Supprimer cet hôte ?',
-            message: (
-              <>
-                <b className="text-mist-100">{host.name}</b> et tout son historique de métriques seront supprimés.
-                Cette action est irréversible.
-              </>
-            ),
-            confirmLabel: 'Supprimer',
-            danger: true,
-          })
-          if (ok) remove.mutate(host.id)
-        }} />
-      )}
+      <div className="space-y-5">
+        {sections.map((section) => (
+          <section key={section.tag || 'all'}>
+            {byTag && (
+              <div className="flex items-center gap-2 mb-2">
+                <Tag size={13} className="text-violet" />
+                <h2 className="text-sm font-semibold text-mist-200">
+                  {section.tag === '~' ? 'Sans étiquette' : section.tag}
+                </h2>
+                <Badge>{section.hosts.length}</Badge>
+              </div>
+            )}
+            {view === 'grid' ? (
+              <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
+                {section.hosts.map((host: any) => (
+                  <HostCard key={host.id} host={host} />
+                ))}
+              </div>
+            ) : (
+              <HostTable
+                hosts={section.hosts}
+                onPickTag={(tag) => setTagFilter([tag])}
+                onDelete={async (host) => {
+                  const ok = await confirm({
+                    title: 'Supprimer cet hôte ?',
+                    message: (
+                      <>
+                        <b className="text-mist-100">{host.name}</b> et tout son historique de métriques seront
+                        supprimés. Cette action est irréversible.
+                      </>
+                    ),
+                    confirmLabel: 'Supprimer',
+                    danger: true,
+                  })
+                  if (ok) remove.mutate(host.id)
+                }}
+              />
+            )}
+          </section>
+        ))}
+      </div>
 
       <AddHostModal open={addOpen} onClose={() => setAddOpen(false)} />
     </Page>
   )
 }
 
-function HostTable({ hosts, onDelete }: { hosts: any[]; onDelete: (host: any) => void }) {
+function HostTable({
+  hosts,
+  onDelete,
+  onPickTag,
+}: {
+  hosts: any[]
+  onDelete: (host: any) => void
+  onPickTag?: (tag: string) => void
+}) {
   useLive((s) => s.bump)
   const samples = useLive.getState().samples
   const toast = useToast()
@@ -188,7 +261,7 @@ function HostTable({ hosts, onDelete }: { hosts: any[]; onDelete: (host: any) =>
       <table className="w-full text-sm min-w-[680px]">
         <thead>
           <tr className="text-left border-b border-ink-750">
-            {['Hôte', 'Type', 'CPU', 'RAM', 'Disque', 'Vu', ''].map((h) => (
+            {['Hôte', 'Type', 'Étiquettes', 'CPU', 'RAM', 'Disque', 'Vu', ''].map((h) => (
               <th key={h} className="metric-label px-3 py-2 font-semibold">
                 {h}
               </th>
@@ -211,6 +284,13 @@ function HostTable({ hosts, onDelete }: { hosts: any[]; onDelete: (host: any) =>
                 </td>
                 <td className="px-3 py-2">
                   <Badge>{KIND_LABEL[host.kind] ?? host.kind}</Badge>
+                </td>
+                <td className="px-3 py-2">
+                  {(host.tags ?? []).length ? (
+                    <TagList tags={host.tags} onPick={onPickTag} max={3} />
+                  ) : (
+                    <span className="text-ink-700">—</span>
+                  )}
                 </td>
                 {(['cpu.usage', 'mem.percent', 'disk.percent'] as const).map((metric) => (
                   <td key={metric} className="px-3 py-2 w-28">

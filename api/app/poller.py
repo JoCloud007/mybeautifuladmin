@@ -10,11 +10,11 @@ import time
 from typing import Any
 
 from .bus import bus
+from .collectors.aiclient import client_for
 from .collectors import docker as docker_col
 from .collectors import homeassistant as hass_col
 from .collectors import ipmi as ipmi_col
 from .collectors import linux as linux_col
-from .collectors import ollama as ollama_col
 from .collectors import pbs as pbs_col
 from .collectors import proxmox as pve_col
 from .collectors import synology as syno_col
@@ -31,7 +31,7 @@ CONTAINER_EVERY = 15  # inventaire des conteneurs
 PERSISTED_PREFIXES = (
     "cpu.usage", "cpu.user", "cpu.system", "cpu.iowait", "mem.percent", "mem.used",
     "swap.percent", "load.1", "load.5", "load.15", "net.rx", "net.tx",
-    "disk.read", "disk.write", "disk.percent", "temp.", "gpu.", "ollama.",
+    "disk.read", "disk.write", "disk.percent", "temp.", "gpu.", "ollama.", "ai.",
     "docker.containers", "docker.cpu", "docker.mem", "pve.guests", "pve.node",
     "sensor.", "fan.", "power.", "ipmi.", "pbs.", "hass.",
 )
@@ -558,7 +558,7 @@ async def poll_ai_endpoints() -> None:
             endpoints = await fetch_all("SELECT * FROM ai_endpoints WHERE enabled = true")
             for ep in endpoints:
                 try:
-                    snap = await ollama_col.OllamaClient(ep["url"]).snapshot()
+                    snap = await client_for(ep).snapshot()
                     await execute(
                         "UPDATE ai_endpoints SET status='online', meta = CAST(:m AS jsonb) WHERE id=:id",
                         {"id": ep["id"], "m": json.dumps({"version": snap["version"],

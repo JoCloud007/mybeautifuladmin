@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import {
   CalendarClock,
+  Check,
   Download,
   Eraser,
   Pause,
@@ -18,7 +19,7 @@ import { useEffect, useState } from 'react'
 import { Page, PageHeader, SectionTitle } from '@/components/PageHeader'
 import { Badge, Empty, Modal, Spinner, useConfirm, useToast } from '@/components/ui'
 import { del, get, patch, post } from '@/lib/api'
-import { ago, datetime } from '@/lib/format'
+import { ago, datetime, KIND_LABEL } from '@/lib/format'
 
 const ACTION_ICON: Record<string, typeof Download> = {
   upgrade: Download,
@@ -188,7 +189,12 @@ export function SchedulerPage() {
               <div className="grid grid-cols-3 gap-2 text-center">
                 <div>
                   <div className="metric-label">Cibles</div>
-                  <div className="metric-value text-sm">{schedule.targets}</div>
+                  <div
+                    className="metric-value text-sm"
+                    title={(schedule.target_names ?? []).join(', ') || undefined}
+                  >
+                    {schedule.targets}
+                  </div>
                 </div>
                 <div>
                   <div className="metric-label">Prochaine</div>
@@ -373,6 +379,28 @@ function ScheduleModal({
   const kinds = [...new Set(hosts.map((h: any) => h.kind))] as string[]
   const tags = inventory?.tags ?? []
 
+  // Les cibles multiples voyagent en CSV dans `target_value` (colonne TEXT).
+  const selected = (form.target_value ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  const setTargets = (values: string[]) => setForm({ ...form, target_value: values.join(',') })
+  const toggleTarget = (value: string) =>
+    setTargets(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value])
+
+  const choices: { value: string; label: string; hint?: string; count?: number }[] =
+    form.target_kind === 'host'
+      ? hosts.map((host: any) => ({ value: String(host.id), label: host.name, hint: host.address }))
+      : form.target_kind === 'tag'
+        ? tags.map((tag: any) => ({ value: tag.tag, label: tag.tag, count: tag.count }))
+        : form.target_kind === 'kind'
+          ? kinds.map((kind) => ({
+              value: kind,
+              label: KIND_LABEL[kind] ?? kind,
+              count: hosts.filter((h: any) => h.kind === kind).length,
+            }))
+          : []
+
   return (
     <Modal
       open={open}
@@ -534,53 +562,93 @@ function ScheduleModal({
           </p>
         )}
 
-        {/* Portée */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
+        {/* Portée : plusieurs cibles peuvent être cochées, sauf « tout le parc ». */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
             <label>Portée</label>
-            <select
-              value={form.target_kind}
-              onChange={(e) => setForm({ ...form, target_kind: e.target.value, target_value: '' })}
-              className="w-full"
-            >
-              <option value="all">Tout le parc</option>
-              <option value="host">Un hôte précis</option>
-              <option value="tag">Par étiquette</option>
-              <option value="kind">Par type</option>
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <label>Cible</label>
-            {form.target_kind === 'all' ? (
-              <input disabled value="tous les hôtes actifs" className="w-full opacity-60" />
-            ) : (
-              <select
-                value={form.target_value ?? ''}
-                onChange={(e) => setForm({ ...form, target_value: e.target.value })}
-                className="w-full"
-              >
-                <option value="">— choisir —</option>
-                {form.target_kind === 'host' &&
-                  hosts.map((host: any) => (
-                    <option key={host.id} value={String(host.id)}>
-                      {host.name} ({host.address})
-                    </option>
-                  ))}
-                {form.target_kind === 'tag' &&
-                  tags.map((tag: any) => (
-                    <option key={tag.tag} value={tag.tag}>
-                      {tag.tag} ({tag.count})
-                    </option>
-                  ))}
-                {form.target_kind === 'kind' &&
-                  kinds.map((kind) => (
-                    <option key={kind} value={kind}>
-                      {kind}
-                    </option>
-                  ))}
-              </select>
+            {form.target_kind !== 'all' && (
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="text-ink-500">
+                  {selected.length} sélection{selected.length > 1 ? 's' : ''}
+                </span>
+                {choices.length > 0 && (
+                  <>
+                    <button
+                      className="text-ink-500 hover:text-accent normal-case tracking-normal"
+                      onClick={() => setTargets(choices.map((c) => c.value))}
+                    >
+                      tout cocher
+                    </button>
+                    <button
+                      className="text-ink-500 hover:text-accent normal-case tracking-normal"
+                      onClick={() => setTargets([])}
+                      disabled={selected.length === 0}
+                    >
+                      vider
+                    </button>
+                  </>
+                )}
+              </div>
             )}
           </div>
+
+          <div className="flex bg-ink-850 border border-ink-750 rounded-lg p-0.5 w-fit">
+            {(
+              [
+                ['all', 'Tout le parc'],
+                ['host', 'Des hôtes'],
+                ['tag', 'Des étiquettes'],
+                ['kind', 'Des types'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setForm({ ...form, target_kind: value, target_value: '' })}
+                className={clsx(
+                  'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                  form.target_kind === value ? 'bg-ink-750 text-accent' : 'text-ink-500 hover:text-mist-300',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {form.target_kind === 'all' ? (
+            <p className="text-[12px] text-ink-500">
+              Tous les hôtes actifs, y compris ceux ajoutés après la création de cette planification.
+            </p>
+          ) : (
+            <div className="max-h-44 overflow-y-auto flex flex-wrap gap-1.5 p-2 rounded-lg bg-ink-900/60 border border-ink-800">
+              {choices.length === 0 && (
+                <span className="text-[12px] text-ink-500">
+                  {form.target_kind === 'tag'
+                    ? "Aucune étiquette définie — étiquette d'abord tes hôtes depuis l'inventaire."
+                    : 'Aucune cible disponible.'}
+                </span>
+              )}
+              {choices.map((choice) => {
+                const isOn = selected.includes(choice.value)
+                return (
+                  <button
+                    key={choice.value}
+                    onClick={() => toggleTarget(choice.value)}
+                    title={choice.hint}
+                    className={clsx(
+                      'chip transition-colors',
+                      isOn
+                        ? 'border-accent/40 bg-accent/10 text-accent'
+                        : 'border-ink-700 bg-ink-850 text-mist-400 hover:text-mist-200',
+                    )}
+                  >
+                    {isOn && <Check size={11} />}
+                    {choice.label}
+                    {choice.count !== undefined && <span className="text-ink-500 ml-0.5">{choice.count}</span>}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* Récurrence */}

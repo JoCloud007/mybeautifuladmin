@@ -163,6 +163,7 @@ const KIND_LABELS: Record<string, string> = {
   api_token: "Jeton d'API (utilisateur + secret)",
   token: 'Jeton simple',
   basic: 'HTTP Basic',
+  ovh_api: 'API OVHcloud (trois clés)',
 }
 
 const KIND_HELP: Record<string, string> = {
@@ -175,6 +176,10 @@ const KIND_HELP: Record<string, string> = {
     "Jeton unique, sans utilisateur : Home Assistant (jeton d'accès longue durée), " +
     "Tailscale (tskey-api-…), ou toute API en Bearer.",
   basic: 'Authentification HTTP basique (utilisateur + mot de passe).',
+  ovh_api:
+    "Les trois clés délivrées d'un coup par api.ovh.com/createToken/ : application, secrète et " +
+    "consommateur. Demande au minimum GET sur /cloud/* : c'est ce qui ouvre les buckets, " +
+    'les ressources et la consommation du projet.',
 }
 
 /** Types dont le secret se suffit à lui-même. */
@@ -241,6 +246,7 @@ function CredentialModal({
   }
 
   const isKey = form.kind === 'ssh_key'
+  const isOvh = form.kind === 'ovh_api'
   const needsUser = !SECRET_ONLY.has(form.kind)
   const canSubmit = form.name && (editMode || form.secret)
 
@@ -295,13 +301,15 @@ function CredentialModal({
         {needsUser && (
           <div className="space-y-1.5">
             <label>
-              Utilisateur{' '}
-              <span className="normal-case tracking-normal text-ink-600">(facultatif)</span>
+              {isOvh ? "Clé d'application" : 'Utilisateur'}{' '}
+              {!isOvh && (
+                <span className="normal-case tracking-normal text-ink-600">(facultatif)</span>
+              )}
             </label>
             <input
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
-              placeholder={form.kind === 'api_token' ? 'root@pam!mba' : 'root'}
+              placeholder={isOvh ? 'application key' : form.kind === 'api_token' ? 'root@pam!mba' : 'root'}
               className="w-full font-mono"
             />
             {form.kind === 'api_token' && (
@@ -315,7 +323,7 @@ function CredentialModal({
 
         <div className="space-y-1.5">
           <label>
-            {isKey ? 'Clé privée' : 'Secret'}
+            {isKey ? 'Clé privée' : isOvh ? 'Clé secrète' : 'Secret'}
             {editMode && (
               <span className="normal-case tracking-normal text-ink-600">
                 {' '}
@@ -348,14 +356,21 @@ function CredentialModal({
           )}
         </div>
 
-        {(isKey || form.kind === 'ssh_password') && (
+        {(isKey || isOvh || form.kind === 'ssh_password') && (
           <div className="space-y-1.5">
-            <label>{isKey ? 'Phrase de passe (optionnelle)' : 'Code OTP DSM (optionnel)'}</label>
+            <label>
+              {isKey
+                ? 'Phrase de passe (optionnelle)'
+                : isOvh
+                  ? 'Clé de consommateur'
+                  : 'Code OTP DSM (optionnel)'}
+            </label>
             <input
               type="password"
               value={form.passphrase}
               onChange={(e) => setForm({ ...form, passphrase: e.target.value })}
               placeholder={editMode ? '(inchangé)' : ''}
+              required={isOvh && !editMode}
               className="w-full font-mono"
             />
           </div>

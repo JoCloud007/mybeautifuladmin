@@ -1,6 +1,16 @@
 import clsx from 'clsx'
 import { useQuery } from '@tanstack/react-query'
-import { Boxes, CornerDownLeft, Globe, Radar, Search, Server, TerminalSquare } from 'lucide-react'
+import {
+  Boxes,
+  Cloud,
+  CornerDownLeft,
+  Globe,
+  PackageCheck,
+  Radar,
+  Search,
+  Server,
+  TerminalSquare,
+} from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
@@ -54,7 +64,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       { id: 'nav-overview', label: "Vue d'ensemble", group: 'Aller à', icon: Radar, action: go('/') },
       { id: 'nav-hosts', label: 'Hôtes', group: 'Aller à', icon: Server, action: go('/hosts') },
       { id: 'nav-containers', label: 'Conteneurs', group: 'Aller à', icon: Boxes, action: go('/containers') },
+      { id: 'nav-updates', label: 'Mises à jour', group: 'Aller à', icon: PackageCheck, action: go('/updates') },
       { id: 'nav-services', label: 'Services web', group: 'Aller à', icon: Globe, action: go('/services') },
+      { id: 'nav-cloud', label: 'Cloud public', group: 'Aller à', icon: Cloud, action: go('/cloud') },
       { id: 'nav-terminal', label: 'Terminal', group: 'Aller à', icon: TerminalSquare, action: go('/terminal') },
       { id: 'nav-discovery', label: 'Scanner le réseau', group: 'Aller à', icon: Radar, action: go('/discovery') },
     ]

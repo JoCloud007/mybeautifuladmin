@@ -22,7 +22,7 @@ import time
 from typing import Any
 
 from .bus import bus
-from .collectors.ollama import OllamaClient
+from .collectors.aiclient import client_for
 from .db import execute, fetch_all, fetch_one
 from .scheduler import next_occurrence, validate_cron
 
@@ -224,13 +224,15 @@ async def build_context(agent: dict) -> dict[str, Any]:
             "etiquettes": host.get("tags") or [],
         })
 
+    # Le motif « %:latest » passe par un paramètre : écrit en dur dans la requête,
+    # SQLAlchemy y verrait le paramètre nommé « :latest » et refuserait d'exécuter.
     containers = await fetch_all(
         """SELECT c.name, c.state, c.image, c.project, h.name AS host
            FROM containers c JOIN hosts h ON h.id = c.host_id
-           WHERE c.kind = 'docker' AND (c.state <> 'running' OR c.image LIKE '%:latest')
+           WHERE c.kind = 'docker' AND (c.state <> 'running' OR c.image LIKE :floating)
              AND (:empty OR c.host_id = ANY(CAST(:ids AS integer[])))
            ORDER BY (c.state <> 'running') DESC LIMIT 25""",
-        {"ids": host_ids or [0], "empty": not host_ids},
+        {"ids": host_ids or [0], "empty": not host_ids, "floating": "%:latest"},
     )
 
     findings = await fetch_all(
@@ -330,7 +332,7 @@ async def _call_model(agent: dict, system: str, user: str) -> tuple[str, dict]:
     if not endpoint:
         raise AgentError("Aucun endpoint IA associé à cet agent")
 
-    client = OllamaClient(endpoint["url"], timeout=300.0)
+    client = client_for(endpoint, timeout=300.0)
     chunks: list[str] = []
     stats: dict[str, Any] = {}
     try:

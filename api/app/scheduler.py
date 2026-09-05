@@ -57,23 +57,55 @@ def validate_cron(cron: str) -> None:
 
 
 # ------------------------------------------------------------------- cibles
+def target_values(schedule: dict) -> list[str]:
+    """Cibles d'une planification, toujours sous forme de liste.
+
+    La colonne `target_value` est un TEXT historique : les cibles multiples y
+    sont stockées séparées par des virgules. Les identifiants d'hôtes, les
+    étiquettes et les types ne contiennent pas de virgule, le séparateur est
+    donc sans ambiguïté.
+    """
+    raw = schedule.get("target_value")
+    if raw is None:
+        return []
+    values = raw if isinstance(raw, (list, tuple)) else str(raw).split(",")
+    seen, out = set(), []
+    for value in values:
+        cleaned = str(value).strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            out.append(cleaned)
+    return out
+
+
 async def resolve_targets(schedule: dict) -> list[dict]:
     kind = schedule["target_kind"]
-    value = schedule.get("target_value")
+    values = target_values(schedule)
 
+    if kind == "all":
+        return await fetch_all("SELECT * FROM hosts WHERE enabled ORDER BY name")
+    if not values:
+        return []
     if kind == "host":
-        host = await fetch_one("SELECT * FROM hosts WHERE id = :id AND enabled",
-                               {"id": int(value)} if value else {"id": -1})
-        return [host] if host else []
-    if kind == "tag":
+        ids = [int(v) for v in values if v.lstrip("-").isdigit()]
+        if not ids:
+            return []
         return await fetch_all(
-            "SELECT * FROM hosts WHERE enabled AND :tag = ANY(tags) ORDER BY name", {"tag": value}
+            "SELECT * FROM hosts WHERE enabled AND id = ANY(CAST(:ids AS integer[])) ORDER BY name",
+            {"ids": ids},
+        )
+    if kind == "tag":
+        # `&&` = intersection : l'hôte porte au moins une des étiquettes visées.
+        return await fetch_all(
+            "SELECT * FROM hosts WHERE enabled AND tags && CAST(:tags AS text[]) ORDER BY name",
+            {"tags": values},
         )
     if kind == "kind":
         return await fetch_all(
-            "SELECT * FROM hosts WHERE enabled AND kind = :k ORDER BY name", {"k": value}
+            "SELECT * FROM hosts WHERE enabled AND kind = ANY(CAST(:kinds AS text[])) ORDER BY name",
+            {"kinds": values},
         )
-    return await fetch_all("SELECT * FROM hosts WHERE enabled ORDER BY name")
+    return []
 
 
 # ---------------------------------------------------------------- exécution
@@ -205,14 +237,33 @@ async def run_scheduler() -> None:
         await asyncio.sleep(TICK)
 
 
-def describe(schedule: dict) -> str:
-    """Résumé lisible d'une planification, pour les journaux."""
-    target = {
-        "host": f"hôte #{schedule.get('target_value')}",
-        "tag": f"étiquette « {schedule.get('target_value')} »",
-        "kind": f"type {schedule.get('target_value')}",
-        "all": "tout le parc",
-    }.get(schedule["target_kind"], "?")
+def _enumerate(items: list[str], limit: int = 3) -> str:
+    if len(items) <= limit:
+        return ", ".join(items)
+    return ", ".join(items[:limit]) + f" +{len(items) - limit}"
+
+
+def describe(schedule: dict, hosts: list[dict] | None = None) -> str:
+    """Résumé lisible d'une planification, pour les journaux et l'interface.
+
+    `hosts` (cibles déjà résolues) permet de nommer les hôtes plutôt que
+    d'afficher leurs identifiants.
+    """
+    kind = schedule["target_kind"]
+    values = target_values(schedule)
+    plural = "s" if len(values) > 1 else ""
+
+    if kind == "all":
+        target = "tout le parc"
+    elif not values:
+        target = "aucune cible"
+    elif kind == "host":
+        names = [h["name"] for h in hosts] if hosts else [f"#{v}" for v in values]
+        target = _enumerate(names) or "aucune cible"
+    elif kind == "tag":
+        target = f"étiquette{plural} " + _enumerate([f"« {v} »" for v in values])
+    else:
+        target = f"type{plural} " + _enumerate(values)
     return f"{ACTIONS.get(schedule['action'], schedule['action'])} sur {target} ({schedule['cron']})"
 
 

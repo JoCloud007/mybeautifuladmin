@@ -7,16 +7,25 @@ import Foundation
 /// Jamais compilée en Release. Elle évite d'avoir à ressaisir adresse et mot de
 /// passe à chaque réinstallation quand on inspecte les journaux écran par écran :
 ///
+/// Les `SIMCTL_CHILD_*` doivent précéder la commande : placés après le bundle
+/// id, `simctl` les passe en arguments et l'application ne les voit jamais.
+///
 /// ```
-/// xcrun simctl launch --console-pty <device> com.mybeautifuladmin.app \
-///   SIMCTL_CHILD_MBA_SERVER=http://localhost:8888/api \
-///   SIMCTL_CHILD_MBA_USER=admin SIMCTL_CHILD_MBA_PASSWORD=…
+/// SIMCTL_CHILD_MBA_SERVER=http://localhost:8888/api \
+///   SIMCTL_CHILD_MBA_USER=admin SIMCTL_CHILD_MBA_PASSWORD=… \
+///   xcrun simctl launch <device> com.mybeautifuladmin.app
 /// ```
 enum DebugLaunch {
     /// Écran ouvert au démarrage, pour inspecter les journaux vue par vue
     /// sans avoir à naviguer à la main : `SIMCTL_CHILD_MBA_SCREEN=monitoring`.
     static var startScreen: Destination? {
         ProcessInfo.processInfo.environment["MBA_SCREEN"].flatMap(Destination.init(rawValue:))
+    }
+
+    /// Ouvre directement un shell sur cette machine : `MBA_TERMINAL_HOST=3`.
+    /// C'est la seule façon d'atteindre l'émulateur sans piloter les taps.
+    static var terminalHostID: Int? {
+        ProcessInfo.processInfo.environment["MBA_TERMINAL_HOST"].flatMap(Int.init)
     }
 }
 

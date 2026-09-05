@@ -66,10 +66,8 @@ struct OnboardingView: View {
     // MARK: - Sections
 
     private var header: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "server.rack")
-                .font(.system(size: 44, weight: .light))
-                .foregroundStyle(.tint)
+        VStack(spacing: 12) {
+            BrandMark(size: 76)
             Text("MyBeautifulAdmin")
                 .font(.title2.weight(.semibold))
             Text("Connecte-toi à ton serveur central pour superviser et administrer ton infrastructure.")
@@ -265,10 +263,8 @@ struct LoginView: View {
         NavigationStack {
             Form {
                 Section {
-                    VStack(spacing: 8) {
-                        Image(systemName: "lock.shield")
-                            .font(.system(size: 40, weight: .light))
-                            .foregroundStyle(.tint)
+                    VStack(spacing: 12) {
+                        BrandMark(size: 64)
                         Text(profile.name)
                             .font(.title3.weight(.semibold))
                         Text("\(profile.username) · \(profile.displayHost)")

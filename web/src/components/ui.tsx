@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { AlertTriangle, Check, Loader2, X } from 'lucide-react'
+import { AlertTriangle, Check, Loader2, Tag, X } from 'lucide-react'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -173,6 +173,100 @@ export function StatTile({
         {sub && <div className="text-[11px] text-ink-500 truncate mt-0.5">{sub}</div>}
       </div>
     </div>
+  )
+}
+
+// ------------------------------------------------------------- étiquettes
+/** Filtre par étiquettes, partagé par toutes les vues du parc.
+ *
+ * Plusieurs étiquettes cochées = union (l'élément porte *au moins* une des
+ * étiquettes) : c'est ce qu'on attend quand on coche « prod » puis « nas ».
+ */
+export function TagFilter({
+  tags,
+  selected,
+  onChange,
+  className,
+}: {
+  tags: { tag: string; count: number }[]
+  selected: string[]
+  onChange: (tags: string[]) => void
+  className?: string
+}) {
+  if (tags.length === 0) return null
+  const toggle = (tag: string) =>
+    onChange(selected.includes(tag) ? selected.filter((t) => t !== tag) : [...selected, tag])
+
+  return (
+    <div className={clsx('flex flex-wrap items-center gap-1.5', className)}>
+      <Tag size={13} className="text-ink-600 mr-0.5" />
+      <button
+        onClick={() => onChange([])}
+        className={clsx(
+          'chip transition-colors',
+          selected.length === 0
+            ? 'border-accent/40 bg-accent/10 text-accent'
+            : 'border-ink-700 bg-ink-850 text-mist-400 hover:text-mist-200',
+        )}
+      >
+        Toutes
+      </button>
+      {tags.map((entry) => (
+        <button
+          key={entry.tag}
+          onClick={() => toggle(entry.tag)}
+          className={clsx(
+            'chip transition-colors',
+            selected.includes(entry.tag)
+              ? 'border-accent/40 bg-accent/10 text-accent'
+              : 'border-ink-700 bg-ink-850 text-mist-400 hover:text-mist-200',
+          )}
+        >
+          {entry.tag}
+          <span className="text-ink-500 ml-0.5">{entry.count}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Étiquettes d'un hôte en lecture seule, cliquables pour filtrer. */
+export function TagList({
+  tags,
+  onPick,
+  max = 4,
+}: {
+  tags?: string[] | null
+  onPick?: (tag: string) => void
+  max?: number
+}) {
+  const items = tags ?? []
+  if (items.length === 0) return null
+  // Sans `onPick`, on reste sur des `span` : ces étiquettes s'affichent souvent
+  // à l'intérieur d'un lien, où un bouton imbriqué serait invalide.
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {items.slice(0, max).map((tag) =>
+        onPick ? (
+          <button
+            key={tag}
+            onClick={() => onPick(tag)}
+            className="chip border-ink-700 bg-ink-800 text-ink-400 py-0 hover:text-accent hover:border-accent/30 transition-colors"
+          >
+            {tag}
+          </button>
+        ) : (
+          <span key={tag} className="chip border-ink-700 bg-ink-800 text-ink-400 py-0">
+            {tag}
+          </span>
+        ),
+      )}
+      {items.length > max && (
+        <span className="text-[10px] text-ink-600" title={items.join(', ')}>
+          +{items.length - max}
+        </span>
+      )}
+    </span>
   )
 }
 

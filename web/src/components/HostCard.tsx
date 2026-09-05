@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { ArrowDown, ArrowUp, Boxes, Cpu, HardDrive, MemoryStick, Thermometer, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Sparkline } from './Chart'
-import { Badge, Bar, StatusDot } from './ui'
+import { Badge, Bar, StatusDot, TagList } from './ui'
 import { KIND_LABEL, bitrate, duration, num, percent, severity } from '@/lib/format'
 import { useLive } from '@/lib/live'
 
@@ -136,8 +136,9 @@ export function HostCard({ host }: { host: any }) {
         </>
       )}
 
-      <div className="flex items-center justify-between text-[10px] text-ink-600 -mt-1">
-        <span>{live.uptime ? `up ${duration(live.uptime)}` : ''}</span>
+      <div className="flex items-center justify-between gap-2 text-[10px] text-ink-600 -mt-1">
+        <TagList tags={host.tags} max={3} />
+        <span className="flex-1 truncate">{live.uptime ? `up ${duration(live.uptime)}` : ''}</span>
         {(host.meta?.updates ?? 0) > 0 && (
           <Badge tone="warn">{host.meta.updates} maj</Badge>
         )}

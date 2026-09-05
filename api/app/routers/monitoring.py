@@ -38,7 +38,8 @@ CATALOG: list[dict[str, Any]] = [
 async def catalog(user: dict = Depends(current_user)) -> dict:
     """Hôtes supervisés et métriques réellement disponibles pour chacun."""
     hosts = await fetch_all(
-        "SELECT id, name, kind, status FROM hosts WHERE enabled ORDER BY kind, name"
+        "SELECT id, name, kind, status, coalesce(tags, '{}') AS tags "
+        "FROM hosts WHERE enabled ORDER BY kind, name"
     )
     available = await fetch_all(
         """SELECT host_id, metric FROM metrics

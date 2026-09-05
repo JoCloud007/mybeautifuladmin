@@ -8,8 +8,8 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
     case dashboard, hosts, containers, alerts
     case monitoring, network, services, inventory
     case security, protection
-    case proxmox, synology, ipmi, home
-    case terminal, scheduler, remediation, discovery
+    case proxmox, synology, ipmi, home, cloud
+    case terminal, updates, scheduler, remediation, discovery
     case ai, agents
     case events, settings
 
@@ -31,7 +31,9 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .synology: "Synology"
         case .ipmi: "Hors-bande"
         case .home: "Domotique"
+        case .cloud: "Cloud public"
         case .terminal: "Terminal"
+        case .updates: "Mises à jour"
         case .scheduler: "Planificateur"
         case .remediation: "Auto-remédiation"
         case .discovery: "Découverte"
@@ -58,7 +60,9 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .synology: "externaldrive.connected.to.line.below"
         case .ipmi: "cpu"
         case .home: "house"
+        case .cloud: "cloud"
         case .terminal: "terminal"
+        case .updates: "arrow.down.circle"
         case .scheduler: "calendar.badge.clock"
         case .remediation: "wand.and.sparkles"
         case .discovery: "dot.radiowaves.left.and.right"
@@ -76,8 +80,8 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
     static let groups: [(title: String, items: [Destination])] = [
         ("Supervision", [.monitoring, .network, .services, .inventory]),
         ("Sûreté", [.security, .protection]),
-        ("Plateformes", [.proxmox, .synology, .ipmi, .home]),
-        ("Opérations", [.terminal, .scheduler, .remediation, .discovery]),
+        ("Plateformes", [.proxmox, .synology, .ipmi, .home, .cloud]),
+        ("Opérations", [.terminal, .updates, .scheduler, .remediation, .discovery]),
         ("Intelligence", [.ai, .agents]),
         ("Système", [.events, .settings]),
     ]

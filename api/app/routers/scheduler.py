@@ -4,7 +4,7 @@ import json
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .. import scheduler as engine
 from ..db import execute, fetch_all, fetch_one
@@ -16,6 +16,15 @@ Action = Literal["upgrade", "reboot", "shutdown", "service", "container", "prune
 TargetKind = Literal["host", "tag", "kind", "all"]
 
 
+def _csv(value: Any) -> Any:
+    """Une planification peut viser plusieurs cibles : l'interface envoie une
+    liste, la base stocke une chaîne séparée par des virgules."""
+    if isinstance(value, (list, tuple, set)):
+        joined = ",".join(sorted({str(v).strip() for v in value if str(v).strip()}))
+        return joined or None
+    return value
+
+
 class ScheduleIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     action: Action
@@ -24,6 +33,11 @@ class ScheduleIn(BaseModel):
     params: dict[str, Any] = {}
     cron: str = Field(min_length=5)
     enabled: bool = True
+
+    @field_validator("target_value", mode="before")
+    @classmethod
+    def _normalize_target(cls, value: Any) -> Any:
+        return _csv(value)
 
 
 class SchedulePatch(BaseModel):
@@ -34,6 +48,11 @@ class SchedulePatch(BaseModel):
     params: dict[str, Any] | None = None
     cron: str | None = None
     enabled: bool | None = None
+
+    @field_validator("target_value", mode="before")
+    @classmethod
+    def _normalize_target(cls, value: Any) -> Any:
+        return _csv(value)
 
 
 def _validate(action: str, target_kind: str, target_value: str | None, params: dict) -> None:
@@ -51,11 +70,14 @@ def _validate(action: str, target_kind: str, target_value: str | None, params: d
 async def list_schedules(user: dict = Depends(current_user)) -> dict:
     schedules = await fetch_all("SELECT * FROM schedules ORDER BY enabled DESC, next_run")
     for schedule in schedules:
-        schedule["description"] = engine.describe(schedule)
         try:
-            schedule["targets"] = len(await engine.resolve_targets(schedule))
+            hosts = await engine.resolve_targets(schedule)
         except Exception:  # noqa: BLE001
-            schedule["targets"] = 0
+            hosts = []
+        schedule["targets"] = len(hosts)
+        schedule["target_names"] = [h["name"] for h in hosts]
+        schedule["target_values"] = engine.target_values(schedule)
+        schedule["description"] = engine.describe(schedule, hosts)
     return {
         "schedules": schedules,
         "actions": engine.ACTIONS,

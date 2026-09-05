@@ -16,7 +16,7 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Page, PageHeader, SectionTitle } from '@/components/PageHeader'
 import {
   Badge,
@@ -540,12 +540,21 @@ function AgentModal({
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState<any | null>(null)
   const toast = useToast()
+  const hasInit = useRef(false)
 
   const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: () => get('/hosts'), enabled: open })
   const { data: inventory } = useQuery({ queryKey: ['inventory'], queryFn: () => get('/inventory'), enabled: open })
 
+  // Initialise le formulaire une seule fois par ouverture de modal.
+  // Le parent re-fetch agents toutes les 15 s : sans cette garde, la nouvelle
+  // référence de l'objet agent réinitialiserait le formulaire en pleine saisie.
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      hasInit.current = false
+      return
+    }
+    if (hasInit.current) return
+    hasInit.current = true
     setPreview(null)
     if (agent) {
       setForm({
@@ -715,12 +724,16 @@ function AgentModal({
               }}
               className="w-full"
             >
+              <option value="">— choisir —</option>
               {(catalog?.endpoints ?? []).map((e: any) => (
                 <option key={e.id} value={e.id}>
                   {e.name} ({e.status})
                 </option>
               ))}
             </select>
+            {!form.endpoint_id && (
+              <p className="text-[11px] text-danger">Veuillez sélectionner un endpoint IA.</p>
+            )}
           </div>
           <div className="space-y-1.5">
             <label>Modèle</label>

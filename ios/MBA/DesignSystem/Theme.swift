@@ -44,6 +44,34 @@ enum Palette {
         }
     }
 
+    /// Gravité d'un constat d'audit ou d'un risque de sauvegarde. « Élevé » vaut
+    /// rouge comme « critique » : à l'écran, la distinction se lit au libellé, et
+    /// traiter un constat élevé comme un avertissement le ferait passer inaperçu.
+    static func finding(_ severity: FindingSeverity) -> Color {
+        switch severity {
+        case .critical, .high: danger
+        case .medium: warn
+        case .low: Color.accentColor
+        case .info: idle
+        }
+    }
+
+    /// Note sur 100 : ici le haut est bon, l'inverse des jauges d'occupation.
+    static func score(_ score: Int) -> Color {
+        if score >= 85 { return ok }
+        if score >= 60 { return warn }
+        return danger
+    }
+
+    static func freshness(_ freshness: Freshness) -> Color {
+        switch freshness {
+        case .fresh: ok
+        case .stale: warn
+        case .critical: danger
+        case .unknown: idle
+        }
+    }
+
     /// Vert quand le service répond, rouge sinon — même code que la console web.
     static func serviceStatus(_ status: String) -> Color {
         switch status {
@@ -65,6 +93,14 @@ extension AlertSeverity {
 
 extension EventLevel {
     var color: Color { Palette.level(self) }
+}
+
+extension FindingSeverity {
+    var color: Color { Palette.finding(self) }
+}
+
+extension Freshness {
+    var color: Color { Palette.freshness(self) }
 }
 
 /// Espacements et rayons partagés, pour que les cartes d'un écran à l'autre

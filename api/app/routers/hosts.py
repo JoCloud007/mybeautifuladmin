@@ -46,7 +46,7 @@ class HostPatch(BaseModel):
     meta: dict[str, Any] | None = None
 
 
-CredentialKind = Literal["ssh_password", "ssh_key", "api_token", "token", "basic"]
+CredentialKind = Literal["ssh_password", "ssh_key", "api_token", "token", "basic", "ovh_api"]
 
 # Types qui n'ont pas d'utilisateur : le secret se suffit à lui-même.
 SECRET_ONLY = {"token"}
@@ -306,7 +306,8 @@ async def all_containers(
     host_id: int | None = None,
     user: dict = Depends(current_user),
 ) -> list[dict]:
-    sql = ("SELECT c.*, h.name AS host_name, h.kind AS host_kind FROM containers c "
+    sql = ("SELECT c.*, h.name AS host_name, h.kind AS host_kind, "
+           "coalesce(h.tags, '{}') AS host_tags FROM containers c "
            "JOIN hosts h ON h.id = c.host_id")
     params: dict = {}
     if host_id:

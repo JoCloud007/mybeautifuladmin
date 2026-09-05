@@ -146,24 +146,29 @@ async def _from_synology(host: dict) -> dict[str, Any]:
 
     protected, jobs = [], []
     for task in tasks:
+        # La fraîcheur se juge sur la dernière session *réussie* : une tentative
+        # qui a échoué hier ne protège rien.
         age = _age_hours(task.get("last_backup"))
         ok = str(task.get("last_result", "")).lower() in ("", "success", "done", "0", "normal")
         protected.append({
-            "source": "hyperbackup",
+            "source": "c2" if task.get("is_c2") else "hyperbackup",
             "source_host": host["name"],
             "source_host_id": host["id"],
             "name": task.get("name") or f"tâche {task.get('id')}",
             "kind": "hyperbackup",
             "ref": str(task.get("id")),
             "store": task.get("target"),
-            "count": 1,
+            # Chaque version conservée est un point de restauration.
+            "count": task.get("versions") or 1,
             "size": task.get("size"),
             "last_backup": task.get("last_backup"),
+            "last_attempt": task.get("last_attempt"),
             "age_hours": age,
             "freshness": _freshness(age),
             "last_result": task.get("last_result"),
             "enabled": task.get("enabled", True),
-            "is_c2": bool(task.get("is_c2")),
+            # Un dépôt distant (C2 ou autre NAS) satisfait la règle du hors site.
+            "offsite": bool(task.get("offsite")),
         })
         jobs.append({
             "source": "c2" if task.get("is_c2") else "hyperbackup",
@@ -171,16 +176,11 @@ async def _from_synology(host: dict) -> dict[str, Any]:
             "type": "hyperbackup",
             "target": task.get("name"),
             "status": "OK" if ok else str(task.get("last_result")),
-            "started": task.get("last_backup"),
-            "ended": task.get("last_backup"),
+            "started": task.get("last_attempt") or task.get("last_backup"),
+            "ended": task.get("last_attempt") or task.get("last_backup"),
             "schedule": task.get("schedule"),
             "next": task.get("next_backup"),
         })
-    # Une tâche vers C2 est une sauvegarde hors site : on la distingue.
-    for item in protected:
-        if item.pop("is_c2", False):
-            item["source"] = "c2"
-            item["offsite"] = True
 
     return {"protected": protected, "datastores": [], "tasks": jobs, "notices": notices}
 

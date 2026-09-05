@@ -2,8 +2,8 @@
 
 Console unifiée de **supervision et d'administration** pour une infra maison :
 serveurs Linux, hyperviseurs Proxmox, NAS Synology, conteneurs Docker, services
-web et endpoints Ollama — le tout **sans agent à installer**, via SSH et les API
-natives de chaque plateforme.
+web et serveurs d'inférence (Ollama, vLLM) — le tout **sans agent à installer**,
+via SSH et les API natives de chaque plateforme.
 
 ```
 ┌─────────┐      ┌──────────────┐      ┌──────────────┐
@@ -13,8 +13,8 @@ natives de chaque plateforme.
 └─────────┘      └──────┬───────┘      └──────────────┘
                         │ SSH · HTTPS · socket Docker
                         ▼
-  Linux · Proxmox · PBS · Synology · Docker · Ollama
-         BMC (IPMI) · Home Assistant
+  Linux · Proxmox · PBS · Synology · Docker · Ollama · vLLM
+   BMC (IPMI) · Home Assistant · OVHcloud (cloud public)
 ```
 
 ## Prérequis
@@ -74,6 +74,14 @@ depuis Réglages → Compte.
 | Jeton d'API | utilisateur + secret | Proxmox VE, Proxmox Backup Server |
 | Jeton simple | secret seul | Home Assistant, Tailscale, API en Bearer |
 | HTTP Basic | utilisateur + mot de passe | BMC, services web protégés |
+| API OVHcloud | clé d'application + clé secrète + clé de consommateur | projets Public Cloud, stockage objet |
+
+**Clés OVHcloud** — les trois d'un coup sur https://api.ovh.com/createToken/,
+avec au minimum `GET` sur `/cloud/*` (ou `/*` pour tout). Dans MBA, type « API
+OVHcloud » : la clé d'application va dans le champ utilisateur, la clé secrète
+dans le secret, la clé de consommateur dans le dernier champ. Un jeton créé sur
+un autre endpoint qu'Europe ne fonctionne qu'avec cet endpoint — MBA renvoie
+alors le même « application key is invalid » qu'une clé révoquée.
 
 **Jeton Proxmox** — l'erreur la plus fréquente. Dans Datacenter → Permissions →
 API Tokens → Add : renseigne l'utilisateur (`root@pam`), un Token ID (`mba`), et
@@ -92,7 +100,7 @@ jeton ». C'est un JWT en trois parties ; enregistre-le en type « Jeton simple 
 |---|---|---|---|
 | Linux | 22 | clé SSH ou mot de passe | CPU (global + par cœur), RAM, swap, réseau, I/O disque, systèmes de fichiers, températures, GPU AMD, top processus, services systemd, mises à jour en attente |
 | Proxmox | 8006 | jeton d'API `user@pam!nom` | charge des nœuds, inventaire VM/LXC, stockages, actions start/stop/reboot |
-| Synology | 5001 | compte DSM administrateur | CPU, RAM, réseau, volumes, disques + SMART, paquets, partages |
+| Synology | 5001 | compte DSM administrateur | CPU, RAM, réseau, volumes, disques + SMART, paquets, partages, tâches planifiées, services DSM, comptes et sessions |
 | Docker | 22 | clé SSH | métriques système **et** conteneurs (CPU, RAM, ports, journaux) |
 | IPMI/BMC | 443 (Redfish) | compte du contrôleur | alimentation, températures, ventilateurs, PSU, journal SEL |
 | PBS | 8007 | jeton `user@pbs!id:secret` | datastores, groupes de sauvegarde, tâches, vérifications |
@@ -127,15 +135,33 @@ en direct et la liste des sessions vivantes sur le serveur.
 **Actions.** Mise à jour des paquets avec sortie diffusée en direct, redémarrage,
 extinction, contrôle des services systemd, start/stop/restart des conteneurs,
 actions Proxmox sur les VM et LXC, reboot DSM, et gestion des paquets Synology —
-démarrage, arrêt et **mise à jour** depuis le catalogue Synology.
+démarrage, arrêt, **mise à jour** depuis le catalogue Synology, paquet par paquet
+ou tous d'un coup.
 Chaque action est confirmée, tracée et consultable dans **Journal → Actions**.
+
+**Synology.** Au-delà du stockage et des paquets : la **mise à jour de DSM**
+lui-même, en deux temps — télécharger (sans rien interrompre), puis installer
+(le NAS redémarre) ; le **planificateur de tâches** DSM, avec exécution immédiate
+et activation/désactivation ; les **services** exposés par le NAS ; les **comptes**
+DSM et les **sessions ouvertes**. DSM n'expose pas toujours ces API selon le
+modèle et les droits du compte : chaque panneau dit alors ce qui manque plutôt
+que d'échouer en silence.
 
 **Services web.** Sondes HTTP périodiques : disponibilité sur 24 h, latence,
 historique des incidents, alerte au changement d'état.
 
-**IA & accélérateurs.** Inventaire des modèles Ollama, modèles chargés et VRAM
-occupée, téléchargement et déchargement, et un mode dialogue en flux avec compteur
-de tokens/seconde. Les GPU AMD sont lus via sysfs : occupation, VRAM, GTT,
+**IA & accélérateurs.** Deux types de serveurs d'inférence cohabitent :
+**Ollama**, dont MBA gère aussi le cycle de vie des modèles (inventaire, VRAM
+occupée, téléchargement, déchargement), et toute **API compatible OpenAI** —
+vLLM, TGI, LM Studio, llama.cpp, passerelle — déclarée par son URL `/v1` et, si
+le serveur l'exige, une clé d'API chiffrée par le coffre. URL, type, machine liée
+et clé se modifient depuis la fiche du serveur : la clé peut être remplacée ou
+retirée sans rien perdre, et tout changement de connexion est éprouvé avant
+d'être enregistré. Un serveur compatible
+OpenAI ne gère pas ses poids : MBA n'y propose que l'inventaire de
+`/v1/models` et le dialogue, et masque les gestes qui n'existent pas de son
+côté. Dans les deux cas, le dialogue est en flux avec compteur de
+tokens/seconde. Les GPU AMD sont lus via sysfs : occupation, VRAM, GTT,
 températures, fréquences et enveloppe de puissance. Sur un APU à **mémoire
 unifiée** comme le Ryzen AI Max (Strix Halo), la carte affiche VRAM dédiée et GTT
 partagée séparément, puisque c'est la RAM système qui sert de mémoire au GPU.
@@ -204,8 +230,14 @@ réellement déclarées par le BMC sont proposées.
 DSM et **Synology C2** repéré à travers les tâches Hyper Backup dont la
 destination est C2. Hyper Backup est découvert automatiquement dès qu'un NAS est
 enregistré : MBA interroge `SYNO.API.Info` pour savoir si le paquet est présent,
-et explique clairement le contraire quand il ne l'est pas. La règle 3-2-1 est
-vérifiée : sans copie hors site, un risque est levé. La page répond à deux questions : *qu'est-ce qui n'est pas sauvegardé* (VM,
+et explique clairement le contraire quand il ne l'est pas — un NAS qui *reçoit*
+les sauvegardes des autres (Vault) est reconnu comme tel plutôt que signalé comme
+défaillant. La liste des tâches DSM ne porte aucune date : MBA lit donc
+l'historique des versions (`SYNO.Backup.Version`) pour dater la dernière session
+**réussie** — une tentative en échec ne rajeunit pas une sauvegarde — et le dépôt
+(`SYNO.Backup.Repository`) pour nommer la destination et savoir si elle est
+distante. La règle 3-2-1 est vérifiée : sans copie hors site, un risque est levé,
+et un dépôt distant (C2 ou NAS déporté) compte comme telle. La page répond à deux questions : *qu'est-ce qui n'est pas sauvegardé* (VM,
 conteneurs et machines absents de toute sauvegarde) et *quelles sauvegardes ne
 sont plus fiables* (copie périmée, tâche désactivée ou en échec, version unique
 conservée, datastore proche de la saturation, groupe jamais vérifié). Chaque
@@ -220,7 +252,7 @@ seuls des services réversibles sont autorisés depuis MBA.
 
 **Agents IA.** Des agents spécialisés — exploitation, mises à jour, sécurité,
 sauvegardes, ou mission sur mesure — analysent l'état du parc via un modèle local
-(Ollama) et proposent des corrections. Trois niveaux d'autonomie : **observation**
+(Ollama ou vLLM) et proposent des corrections. Trois niveaux d'autonomie : **observation**
 (analyse seule), **proposition** (chaque action attend une validation) et
 **autonome** (les actions réversibles s'appliquent seules, le reste passe en file
 d'attente). La liste blanche est vérifiée côté serveur, pas seulement dans
@@ -230,13 +262,16 @@ raisonnement et le sort de chaque action ; un quota borne le nombre d'actions pa
 passage.
 
 **Conteneurs.** Regroupement **par pile docker compose** (lu dans les labels
-`com.docker.compose.*`) ou **par hôte**, avec actions sur toute une pile —
-démarrer, arrêter, redémarrer d'un coup. Les groupes arrivent **repliés** : avec
-des dizaines de piles, on voit d'abord la liste, puis on ouvre celle qui
-intéresse — sauf pendant une recherche, où les résultats restent dépliés.
-L'essentiel des ressources reste visible sur la ligne repliée, et une vue
-**synthèse** donne
-une ligne par pile : conteneurs actifs, CPU et RAM cumulés, images, ports. La **mise à jour** se fait à deux
+`com.docker.compose.*`), **par hôte** ou **par étiquette**, avec actions sur toute
+une pile — démarrer, arrêter, redémarrer, mettre à jour d'un coup. Un bandeau
+chiffré ouvre la page : conteneurs en marche, à l'arrêt, piles, RAM cumulée et
+**images flottantes** (`:latest`, dont on ne sait pas quelle version tourne). Trois
+présentations : **synthèse** (une ligne par pile : état, CPU et RAM cumulés,
+étiquettes, ports), **liste** (une ligne par conteneur, format par défaut, pensé
+pour être scanné : état, image et son tag, CPU, RAM, ports, actions) et **cartes**.
+Ce qui ne tourne pas remonte en tête, pile comme conteneur — c'est ce qu'on vient
+regarder. Les groupes arrivent **repliés** au-delà de six, et une recherche laisse
+toujours ses résultats dépliés. La **mise à jour** se fait à deux
 niveaux : `docker pull` sur un conteneur pour récupérer sa dernière image, ou
 `compose pull && up -d` sur toute une pile — seule voie sûre pour recréer des
 conteneurs, puisque compose connaît leur configuration complète. Le **nettoyage
@@ -244,11 +279,25 @@ Docker** affiche d'abord ce qui est occupé et ce qui est récupérable, puis la
 choisir quoi purger : les options sûres sont pré-cochées, celles qui détruisent
 des données (volumes, images taguées) sont signalées et laissées décochées.
 
+**Mises à jour.** Une page pour tout ce qui est en retard, quelle que soit la
+famille : **paquets système** des machines Linux, **piles Docker**, **paquets
+Synology** et **DSM**. Six compteurs ouvrent la page — paquets en attente,
+correctifs de sécurité, redémarrages requis, piles, paquets Synology, machines en
+mise à jour automatique. Chaque famille se traite **par lot** : on coche des
+machines (raccourcis « tout », « en retard », « correctifs de sécurité », ou par
+étiquette) et MBA applique deux mises à jour en parallèle, en tâche de fond ;
+l'**activité récente** en bas de page suit chaque exécution en direct. Les piles
+Docker se mettent à jour de la même façon (`compose pull && up -d`), et chaque NAS
+Synology expose ses paquets et sa mise à jour DSM avec les mêmes garde-fous
+qu'ailleurs. L'état des NAS est mis en cache cinq minutes — l'API DSM est lente —
+et le bouton **Actualiser** force un nouveau relevé.
+
 **Planificateur.** Maintenance récurrente en cron : mise à jour des paquets,
 redémarrage, purge Docker, redémarrage d'un service ou d'un conteneur, commande
-libre. La portée est un hôte, une **étiquette**, un type de machine, ou tout le
-parc. Un aperçu affiche les cibles concernées et les prochains passages avant
-d'enregistrer ; chaque exécution est journalisée et rejouable à la demande.
+libre. La portée se coche : **plusieurs hôtes**, plusieurs **étiquettes**,
+plusieurs types de machines, ou tout le parc. Un aperçu affiche les cibles
+concernées et les prochains passages avant d'enregistrer ; chaque exécution est
+journalisée et rejouable à la demande.
 
 **Réseau.** Tous les équipements vus sur le réseau au même endroit : hôtes
 supervisés, résultats de découverte et machines du tailnet, fusionnés et
@@ -259,6 +308,28 @@ services lisibles (DSM, Proxmox, PBS, Ollama, Home Assistant…). Un onglet
 **historique** retrace ce qui est apparu, ce qui a été détecté sans être adopté,
 et la continuité de la collecte machine par machine — un trou dans les points
 relevés révèle une coupure.
+
+**Cloud public.** Un projet Public Cloud OVHcloud s'enregistre avec ses trois
+clés d'API ; MBA en relève les **buckets S3** (volumétrie, nombre d'objets,
+région), les conteneurs Swift, les instances et les volumes, ainsi que la
+**consommation valorisée** du mois en cours et sa prévision de fin de mois.
+
+Tout passe par l'API du fournisseur, **jamais par l'API S3** : un datastore PBS
+adossé à un bucket y range chaque chunk comme un objet, si bien qu'inventorier
+quelques téraoctets réclamerait des milliers de requêtes `ListObjectsV2` —
+facturées à l'opération. OVH publie déjà la taille et le nombre d'objets de
+chaque bucket : c'est gratuit, et c'est ce qu'on lit. Les régions ne sont
+balayées intégralement qu'une fois par jour ; entre-temps seules celles qui
+portent du stockage sont interrogées.
+
+Chaque relevé alimente un historique conservé **deux ans**, d'où se déduisent la
+**croissance en octets par jour** sur 7 et 30 jours et, si un **seuil** est fixé
+sur un bucket, le nombre de jours avant de l'atteindre — le franchissement
+déclenche un évènement et la notification « Seuil de stockage cloud dépassé ».
+Les buckets qui servent de **backend S3 à un Proxmox Backup Server** sont
+rapprochés de leur datastore : MBA lit la configuration des PBS supervisés pour
+retrouver le nom du bucket, et le rattachement se corrige à la main quand le
+jeton PBS n'a pas le droit de lire `/config`.
 
 **Auto-remédiation.** Des règles qui corrigent d'elles-mêmes : *machine
 injoignable*, *service web en panne*, *alerte déclenchée*, *constat de sécurité*,
@@ -305,9 +376,16 @@ automatique. Trois règles sont créées par défaut (CPU, RAM, disque).
 
 ## Développement
 
+Le `docker compose` se lance **toujours depuis la racine du dépôt** :
+
+```bash
+docker compose up -d db api              # back sur :8080
+```
+
+Puis le front, dans un autre terminal :
+
 ```bash
 cd web && npm install && npm run dev     # front sur :5173, proxy vers :8080
-docker compose up -d db api              # back
 ```
 
 ## Structure
@@ -316,10 +394,12 @@ docker compose up -d db api              # back
 api/app/
   poller.py        moteur de collecte (un worker asyncio par hôte)
   collectors/      linux · proxmox · synology · docker · ollama · tailscale
-                   ipmi · pbs · homeassistant
+                   openai_api (vLLM & compatibles) · ipmi · pbs
+                   homeassistant · ovh
   actions.py       upgrade / reboot / restart, tracés et diffusés
   audit.py         contrôles de sécurité et suivi des constats
   protection.py    couverture des sauvegardes, écarts et risques
+  cloud.py         comptes de cloud public : relevé, historique, lien PBS
   agents.py        agents IA : contexte, invite, garde-fous, exécution
   termsessions.py  shells SSH persistants : tampon, rattachement, expiration
   remediation.py   règles d'auto-remédiation : délai, repos, quota
@@ -334,8 +414,8 @@ web/src/
   components/      graphiques uPlot, terminal, console noVNC,
                    palette de commandes ⌘K
   pages/           tableau de bord, inventaire, monitoring, réseau,
-                   sécurité, sauvegardes, domotique, Proxmox, hors-bande,
-                   conteneurs, agents IA, auto-remédiation, planificateur…
+                   cloud public, sécurité, sauvegardes, domotique, Proxmox,
+                   hors-bande, conteneurs, agents IA, auto-remédiation…
 db/init/           schéma TimescaleDB initial
 ```
 

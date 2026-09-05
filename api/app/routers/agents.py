@@ -71,7 +71,7 @@ def _validate(payload: dict) -> None:
 async def catalog(user: dict = Depends(current_user)) -> dict:
     """Actions disponibles, rôles préconfigurés et endpoints IA utilisables."""
     endpoints = await fetch_all(
-        "SELECT id, name, url, status, meta FROM ai_endpoints WHERE enabled ORDER BY name"
+        "SELECT id, name, url, kind, status, meta FROM ai_endpoints WHERE enabled ORDER BY name"
     )
     from ..bus import bus
 

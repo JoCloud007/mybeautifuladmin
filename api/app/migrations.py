@@ -184,6 +184,73 @@ STATEMENTS: list[str] = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_remediation_runs ON remediation_runs (rule_id, started_at DESC)",
 
+    # ------------------------------------------------------- cloud public
+    # Un compte = un projet chez un fournisseur. Les ressources sont volontairement
+    # génériques (bucket, instance, volume…) pour accueillir autre chose que du
+    # stockage objet sans nouvelle table.
+    """
+    CREATE TABLE IF NOT EXISTS cloud_accounts (
+        id            SERIAL PRIMARY KEY,
+        name          TEXT NOT NULL,
+        provider      TEXT NOT NULL DEFAULT 'ovh',
+        endpoint      TEXT NOT NULL DEFAULT 'ovh-eu',   -- ovh-eu | ovh-ca | ovh-us
+        project_id    TEXT,                             -- identifiant du projet Public Cloud
+        credential_id INTEGER REFERENCES credentials(id) ON DELETE SET NULL,
+        enabled       BOOLEAN NOT NULL DEFAULT true,
+        sync_minutes  INTEGER NOT NULL DEFAULT 30,
+        status        TEXT NOT NULL DEFAULT 'unknown',  -- online | offline | unknown
+        last_error    TEXT,
+        last_sync     TIMESTAMPTZ,
+        meta          JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (provider, project_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS cloud_resources (
+        id          SERIAL PRIMARY KEY,
+        account_id  INTEGER NOT NULL REFERENCES cloud_accounts(id) ON DELETE CASCADE,
+        kind        TEXT NOT NULL,            -- bucket | container | instance | volume
+        ext_id      TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        region      TEXT,
+        status      TEXT,
+        size_bytes  DOUBLE PRECISION,
+        objects     DOUBLE PRECISION,
+        price_month DOUBLE PRECISION,
+        quota_bytes DOUBLE PRECISION,         -- seuil de surveillance, saisi à la main
+        host_id     INTEGER REFERENCES hosts(id) ON DELETE SET NULL,  -- PBS adossé au bucket
+        link_ref    TEXT,                     -- datastore PBS correspondant
+        notes       TEXT,
+        meta        JSONB NOT NULL DEFAULT '{}'::jsonb,
+        first_seen  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (account_id, ext_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_cloud_resources_kind ON cloud_resources (kind, name)",
+    """
+    CREATE TABLE IF NOT EXISTS cloud_usage (
+        time        TIMESTAMPTZ NOT NULL,
+        account_id  INTEGER NOT NULL REFERENCES cloud_accounts(id) ON DELETE CASCADE,
+        resource_id INTEGER REFERENCES cloud_resources(id) ON DELETE CASCADE,
+        metric      TEXT NOT NULL,            -- storage.bytes | storage.objects | cost.month…
+        value       DOUBLE PRECISION NOT NULL
+    )
+    """,
+    "SELECT create_hypertable('cloud_usage', 'time', if_not_exists => TRUE, "
+    "chunk_time_interval => INTERVAL '30 days')",
+    "CREATE INDEX IF NOT EXISTS idx_cloud_usage_resource ON cloud_usage (resource_id, metric, time DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_cloud_usage_account ON cloud_usage (account_id, metric, time DESC)",
+    # Deux ans : la volumétrie d'un stockage objet se lit sur des saisons, pas
+    # sur des minutes, et un point toutes les demi-heures pèse peu.
+    "SELECT add_retention_policy('cloud_usage', INTERVAL '730 days', if_not_exists => TRUE)",
+
+    # ------------------------------------------------------- endpoints IA
+    # Une API compatible OpenAI (vLLM, passerelle) peut demander une clé :
+    # elle est chiffrée par le coffre, comme les identifiants SSH ou SMTP.
+    "ALTER TABLE ai_endpoints ADD COLUMN IF NOT EXISTS api_key_enc TEXT",
+
     # --------------------------------------------- tableaux de bord perso
     """
     CREATE TABLE IF NOT EXISTS dashboards (

@@ -31,6 +31,7 @@ TRIGGERS: dict[str, str] = {
     "service_down": "Service web en panne",
     "security_critical": "Constat de sécurité critique",
     "backup_risk": "Risque de sauvegarde détecté",
+    "cloud_quota": "Seuil de stockage cloud dépassé",
     "action_failed": "Action d'administration en échec",
     "agent_proposal": "Un agent IA propose une action",
     "remediation": "Auto-remédiation exécutée",

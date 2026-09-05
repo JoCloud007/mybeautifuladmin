@@ -2,10 +2,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import {
   Boxes,
+  Check,
   Cpu,
   Download,
   Eraser,
   Gauge as GaugeIcon,
+  Pencil,
   Plus,
   Send,
   Server,
@@ -20,12 +22,13 @@ import { Link } from 'react-router-dom'
 import { LiveChart, PALETTE } from '@/components/Chart'
 import { Page, PageHeader, SectionTitle } from '@/components/PageHeader'
 import { Badge, Bar, Empty, Gauge, Modal, Spinner, StatusDot, useConfirm, useToast } from '@/components/ui'
-import { del, get, post, sse } from '@/lib/api'
+import { del, get, patch, post, sse } from '@/lib/api'
 import { bitrate, bytes, duration, num, percent, severity } from '@/lib/format'
 import { useLive } from '@/lib/live'
 
 export function AiPage() {
   const [addOpen, setAddOpen] = useState(false)
+  const [editing, setEditing] = useState<any | null>(null)
   const [pullOpen, setPullOpen] = useState<number | null>(null)
   const queryClient = useQueryClient()
   useLive((s) => s.bump)
@@ -69,13 +72,13 @@ export function AiPage() {
       )}
 
       <section>
-        <SectionTitle>Endpoints Ollama</SectionTitle>
+        <SectionTitle>Serveurs d'inférence</SectionTitle>
         {endpoints.length === 0 && !isLoading ? (
           <div className="panel">
             <Empty
               icon={<Sparkles size={36} />}
               title="Aucun endpoint IA"
-              hint="Déclare l'URL d'un serveur Ollama (par exemple http://10.0.0.5:11434) pour suivre ses modèles, leur occupation mémoire, et dialoguer directement depuis cette page."
+              hint="Déclare l'URL d'un serveur Ollama (http://10.0.0.5:11434) ou d'une API compatible OpenAI comme vLLM (http://10.0.0.5:8000/v1) pour suivre ses modèles, leur occupation mémoire, et dialoguer directement depuis cette page."
               action={
                 <button className="btn-primary" onClick={() => setAddOpen(true)}>
                   <Plus size={15} />
@@ -91,6 +94,7 @@ export function AiPage() {
                 <EndpointPanel
                   endpoint={endpoint}
                   onPull={() => setPullOpen(endpoint.id)}
+                  onEdit={() => setEditing(endpoint)}
                   onChanged={() => queryClient.invalidateQueries({ queryKey: ['ai-overview'] })}
                 />
                 {endpoint.host_id && <HostVitals hostId={endpoint.host_id} name={endpoint.host_name} />}
@@ -100,7 +104,8 @@ export function AiPage() {
         )}
       </section>
 
-      <AddEndpointModal open={addOpen} onClose={() => setAddOpen(false)} />
+      <EndpointModal open={addOpen} onClose={() => setAddOpen(false)} />
+      <EndpointModal open={editing !== null} endpoint={editing} onClose={() => setEditing(null)} />
       <PullModal endpointId={pullOpen} onClose={() => setPullOpen(null)} />
     </Page>
   )
@@ -331,10 +336,12 @@ function Stat({ label, value }: { label: string; value: string }) {
 function EndpointPanel({
   endpoint,
   onPull,
+  onEdit,
   onChanged,
 }: {
   endpoint: any
   onPull: () => void
+  onEdit: () => void
   onChanged: () => void
 }) {
   const [chatOpen, setChatOpen] = useState(false)
@@ -345,6 +352,9 @@ function EndpointPanel({
   const models = endpoint.models ?? []
   const loaded = endpoint.loaded ?? []
   const loadedNames = new Set(loaded.map((m: any) => m.name))
+  // Une API compatible OpenAI sert un modèle figé : ni téléchargement, ni
+  // suppression, ni déchargement. On masque ce qui n'existe pas de son côté.
+  const can = (capability: string) => (endpoint.capabilities ?? ['chat', 'pull', 'delete', 'unload']).includes(capability)
 
   const removeModel = async (name: string) => {
     const ok = await confirm({
@@ -404,6 +414,7 @@ function EndpointPanel({
         </div>
         <div className="flex-1" />
         {endpoint.error && <span className="text-[11px] text-danger truncate max-w-xs">{endpoint.error}</span>}
+        {endpoint.kind && endpoint.kind !== 'ollama' && <Badge tone="info">{endpoint.kind_label ?? endpoint.kind}</Badge>}
         <Badge>{models.length} modèles</Badge>
         {loaded.length > 0 && <Badge tone="ok">{loaded.length} en mémoire</Badge>}
         <button
@@ -417,9 +428,14 @@ function EndpointPanel({
           <Sparkles size={14} />
           Dialoguer
         </button>
-        <button className="btn-ghost" onClick={onPull}>
-          <Download size={14} />
-          Télécharger
+        {can('pull') && (
+          <button className="btn-ghost" onClick={onPull}>
+            <Download size={14} />
+            Télécharger
+          </button>
+        )}
+        <button className="btn-icon" onClick={onEdit} title="Modifier (URL, clé d'API, machine)">
+          <Pencil size={14} />
         </button>
         <button className="btn-icon hover:text-danger" onClick={removeEndpoint} title="Retirer l'endpoint">
           <Trash2 size={14} />
@@ -440,9 +456,11 @@ function EndpointPanel({
                     {model.expires_at && ` · expire ${new Date(model.expires_at).toLocaleTimeString('fr-FR')}`}
                   </div>
                 </div>
-                <button className="btn-icon" onClick={() => unload(model.name)} title="Décharger de la mémoire">
-                  <Eraser size={13} />
-                </button>
+                {can('unload') && (
+                  <button className="btn-icon" onClick={() => unload(model.name)} title="Décharger de la mémoire">
+                    <Eraser size={13} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -451,7 +469,11 @@ function EndpointPanel({
 
       {models.length === 0 ? (
         <p className="px-4 py-6 text-sm text-ink-500 text-center">
-          {endpoint.status === 'online' ? 'Aucun modèle installé.' : 'Endpoint injoignable.'}
+          {endpoint.status !== 'online'
+            ? 'Endpoint injoignable.'
+            : can('pull')
+              ? 'Aucun modèle installé.'
+              : 'Ce serveur ne publie aucun modèle sur /v1/models.'}
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -492,9 +514,11 @@ function EndpointPanel({
                       >
                         <Sparkles size={13} />
                       </button>
-                      <button className="btn-icon hover:text-danger" onClick={() => removeModel(model.name)} title="Supprimer">
-                        <Trash2 size={13} />
-                      </button>
+                      {can('delete') && (
+                        <button className="btn-icon hover:text-danger" onClick={() => removeModel(model.name)} title="Supprimer">
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -765,26 +789,71 @@ function PullModal({ endpointId, onClose }: { endpointId: number | null; onClose
   )
 }
 
-// -------------------------------------------------------------- ajout endpoint
-function AddEndpointModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [form, setForm] = useState({ name: '', url: 'http://', host_id: '' })
+// ------------------------------------------------- ajout / édition endpoint
+const KINDS = [
+  { kind: 'ollama', label: 'Ollama', placeholder: 'http://10.0.0.5:11434' },
+  { kind: 'openai', label: 'vLLM / API OpenAI', placeholder: 'http://10.0.0.5:8000/v1' },
+]
+
+function EndpointModal({
+  open,
+  endpoint,
+  onClose,
+}: {
+  open: boolean
+  /** Absent : création. Présent : modification de ce serveur. */
+  endpoint?: any
+  onClose: () => void
+}) {
+  const editing = Boolean(endpoint)
+  const [form, setForm] = useState({ name: '', url: 'http://', host_id: '', kind: 'ollama', api_key: '' })
+  const [dropKey, setDropKey] = useState(false)
   const [busy, setBusy] = useState(false)
   const queryClient = useQueryClient()
   const toast = useToast()
   const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: () => get('/hosts'), enabled: open })
 
+  // À chaque ouverture, le formulaire repart de l'endpoint édité — ou à blanc.
+  useEffect(() => {
+    if (!open) return
+    setDropKey(false)
+    setForm({
+      name: endpoint?.name ?? '',
+      url: endpoint?.url ?? 'http://',
+      host_id: endpoint?.host_id ? String(endpoint.host_id) : '',
+      kind: endpoint?.kind ?? 'ollama',
+      api_key: '',
+    })
+  }, [open, endpoint])
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     setBusy(true)
     try {
-      await post('/ai/endpoints', {
+      const body: any = {
         name: form.name || form.url,
         url: form.url,
+        kind: form.kind,
         host_id: form.host_id ? Number(form.host_id) : null,
-      })
-      toast('Endpoint ajouté', 'ok')
+      }
+      if (editing) {
+        // La clé n'est envoyée que si elle change : omise, l'API garde celle en
+        // place ; à null, elle la retire.
+        if (form.kind !== 'openai') {
+          if (endpoint.has_key) body.api_key = null
+        } else if (dropKey) {
+          body.api_key = null
+        } else if (form.api_key.trim()) {
+          body.api_key = form.api_key.trim()
+        }
+        await patch(`/ai/endpoints/${endpoint.id}`, body)
+        toast('Endpoint mis à jour', 'ok')
+      } else {
+        body.api_key = form.kind === 'openai' && form.api_key.trim() ? form.api_key.trim() : null
+        await post('/ai/endpoints', body)
+        toast('Endpoint ajouté', 'ok')
+      }
       queryClient.invalidateQueries({ queryKey: ['ai-overview'] })
-      setForm({ name: '', url: 'http://', host_id: '' })
       onClose()
     } catch (exc: any) {
       toast(exc.message, 'danger')
@@ -797,33 +866,100 @@ function AddEndpointModal({ open, onClose }: { open: boolean; onClose: () => voi
     <Modal
       open={open}
       onClose={onClose}
-      title="Ajouter un endpoint Ollama"
+      title={editing ? "Modifier le serveur d'inférence" : "Ajouter un serveur d'inférence"}
       footer={
         <>
           <button className="btn-ghost" onClick={onClose}>
             Annuler
           </button>
-          <button className="btn-primary" form="add-ai" type="submit" disabled={busy}>
-            {busy ? <Spinner /> : <Plus size={15} />}
-            Ajouter
+          <button className="btn-primary" form="endpoint-form" type="submit" disabled={busy}>
+            {busy ? <Spinner /> : editing ? <Check size={15} /> : <Plus size={15} />}
+            {editing ? 'Enregistrer' : 'Ajouter'}
           </button>
         </>
       }
     >
-      <form id="add-ai" onSubmit={submit} className="space-y-4">
+      <form id="endpoint-form" onSubmit={submit} className="space-y-4">
+        <div className="space-y-1.5">
+          <label>Type de serveur</label>
+          <div className="flex gap-2">
+            {KINDS.map((kind) => (
+              <button
+                key={kind.kind}
+                type="button"
+                onClick={() => setForm({ ...form, kind: kind.kind })}
+                className={clsx(
+                  'chip flex-1 justify-center',
+                  form.kind === kind.kind
+                    ? 'border-accent/50 bg-accent/10 text-accent'
+                    : 'border-ink-700 bg-ink-800 text-mist-400 hover:text-mist-100',
+                )}
+              >
+                {kind.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="space-y-1.5">
           <label>URL de l'API</label>
           <input
             value={form.url}
             onChange={(e) => setForm({ ...form, url: e.target.value })}
-            placeholder="http://10.0.0.5:11434"
+            placeholder={KINDS.find((k) => k.kind === form.kind)?.placeholder}
             required
             className="w-full font-mono"
           />
           <p className="text-[11px] text-ink-500">
-            Ollama doit écouter sur le réseau : <code className="text-mist-300">OLLAMA_HOST=0.0.0.0:11434</code>.
+            {form.kind === 'ollama' ? (
+              <>
+                Ollama doit écouter sur le réseau : <code className="text-mist-300">OLLAMA_HOST=0.0.0.0:11434</code>.
+              </>
+            ) : (
+              <>
+                Toute API compatible OpenAI : vLLM, TGI, LM Studio, llama.cpp, passerelle. Le suffixe{' '}
+                <code className="text-mist-300">/v1</code> est ajouté s'il manque.
+              </>
+            )}
           </p>
         </div>
+        {form.kind === 'openai' && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <label>Clé d'API</label>
+              {editing && endpoint.has_key && (
+                <button
+                  type="button"
+                  className="text-[11px] text-ink-500 hover:text-danger"
+                  onClick={() => {
+                    setDropKey(!dropKey)
+                    setForm({ ...form, api_key: '' })
+                  }}
+                >
+                  {dropKey ? 'Conserver la clé' : 'Retirer la clé'}
+                </button>
+              )}
+            </div>
+            <input
+              value={form.api_key}
+              onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+              type="password"
+              autoComplete="off"
+              disabled={dropKey}
+              placeholder={dropKey ? 'la clé sera retirée' : editing && endpoint.has_key ? '•••••••• inchangée' : '— aucune —'}
+              className="w-full font-mono disabled:opacity-50"
+            />
+            <p className="text-[11px] text-ink-500">
+              {editing && endpoint.has_key && !dropKey ? (
+                'Une clé est enregistrée. Laisse le champ vide pour la conserver, ou saisis-en une nouvelle pour la remplacer.'
+              ) : (
+                <>
+                  Facultative : vLLM lancé sans <code className="text-mist-300">--api-key</code> n'en demande pas. Elle
+                  est chiffrée par le coffre et n'est jamais renvoyée par l'API.
+                </>
+              )}
+            </p>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <label>Nom</label>

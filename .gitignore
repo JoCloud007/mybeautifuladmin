@@ -58,3 +58,6 @@ coverage/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Tidet resources are synced by Tidet Cloud, never by Git.
+.tidet/
