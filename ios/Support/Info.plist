@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.mybeautifuladmin.app.refresh</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>fr</string>
 	<key>CFBundleDisplayName</key>
@@ -20,17 +24,41 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>UILaunchScreen</key>
+	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>UIColorName</key>
-		<string></string>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+		<string>_https._tcp</string>
+	</array>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Déverrouiller l’accès à votre serveur et confirmer les actions sensibles.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MyBeautifulAdmin se connecte à votre serveur central sur le réseau local pour superviser vos machines.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<true/>
+	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string></string>
 	</dict>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
@@ -44,41 +72,6 @@
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>remote-notification</string>
-		<string>fetch</string>
-		<string>processing</string>
-	</array>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>com.mybeautifuladmin.app.refresh</string>
-	</array>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-	<!--
-	  Le serveur est désigné par l'utilisateur, pas par l'app : c'est une machine
-	  de son réseau, jointe en HTTP sur un port privé ou via un VPN, et souvent
-	  en TLS auto-signé. ATS refuserait ces connexions sur un appareil réel — sur
-	  simulateur, localhost est exempté et l'on ne voit qu'un avertissement.
-	  L'exception est donc nécessaire au fonctionnement même de l'application.
-	-->
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>MyBeautifulAdmin se connecte à votre serveur central sur le réseau local pour superviser vos machines.</string>
-	<key>NSFaceIDUsageDescription</key>
-	<string>Déverrouiller l’accès à votre serveur et confirmer les actions sensibles.</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_http._tcp</string>
-		<string>_https._tcp</string>
 	</array>
 </dict>
 </plist>
