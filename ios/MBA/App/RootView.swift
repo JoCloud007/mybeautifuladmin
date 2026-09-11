@@ -219,6 +219,8 @@ struct DestinationView: View {
         case .cloud: CloudView()
         case .ai: AIView()
         case .agents: AgentsView()
+        case .prompt: PromptView()
+        case .mcp: MCPSettingsView()
         case .events: EventsView()
         case .settings: SettingsView()
         }

@@ -10,7 +10,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
     case security, protection
     case proxmox, synology, ipmi, home, cloud
     case terminal, updates, scheduler, remediation, discovery
-    case ai, agents
+    case ai, agents, prompt, mcp
     case events, settings
 
     var id: String { rawValue }
@@ -39,6 +39,8 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .discovery: "Découverte"
         case .ai: "IA & accélérateurs"
         case .agents: "Agents IA"
+        case .prompt: "Prompt Agent"
+        case .mcp: "MCP Server"
         case .events: "Journal"
         case .settings: "Réglages"
         }
@@ -68,6 +70,8 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .discovery: "dot.radiowaves.left.and.right"
         case .ai: "brain"
         case .agents: "person.2.badge.gearshape"
+        case .prompt: "bubble.left.and.sparkles"
+        case .mcp: "network.badge.shield.half.filled"
         case .events: "list.bullet.rectangle"
         case .settings: "gearshape"
         }
@@ -82,7 +86,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         ("Sûreté", [.security, .protection]),
         ("Plateformes", [.proxmox, .synology, .ipmi, .home, .cloud]),
         ("Opérations", [.terminal, .updates, .scheduler, .remediation, .discovery]),
-        ("Intelligence", [.ai, .agents]),
+        ("Intelligence", [.ai, .agents, .prompt, .mcp]),
         ("Système", [.events, .settings]),
     ]
 }
